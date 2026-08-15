@@ -574,7 +574,7 @@
                 <div class="start-sub">BRICK&nbsp;KING</div>
                 <div class="mode-select" id="modeSelect">
                     <button class="mode-btn active" id="mode-1p" type="button">👤 单人</button>
-                    <button class="mode-btn" id="mode-2p" type="button">👥 双人</button>
+                    <button class="mode-btn" id="mode-2p" type="button">⚔ 双人对战</button>
                 </div>
                 <div class="start-buttons" id="startButtons">
                     <button class="btn-primary" id="btn-new">🆕 新游戏</button>
@@ -824,6 +824,8 @@
     // 双人模式：P1 底部球拍（A/D），P2 顶部球拍（←/->）
     let twoPlayer = false;
     let menuTwoPlayer = false;      // 主菜单中的模式选择
+    let duel = null;                // 左右分屏对战的独立比赛状态
+    // 旧合作模式结构保留为惰性兼容，不再参与对战逻辑
     const paddle2 = { x: 0, y: 26, w: PADDLE_WIDTH_BASE, h: PADDLE_HEIGHT };
 
     // ================= 音效 (Web Audio) =================
@@ -1248,7 +1250,7 @@
         } catch (_) { return null; }
     }
     function saveGame() {
-        if (!currentSlot) return;
+        if (!currentSlot || twoPlayer) return;
         try {
             localStorage.setItem(slotKey(currentSlot), JSON.stringify({
                 level, score, lives, buffs, twoPlayer, ts: Date.now(),
@@ -1522,8 +1524,188 @@
         }
     }
 
+    // ================= 左右分屏双人对战 =================
+    function createDuelSide(index) {
+        const x0 = index * (W / 2);
+        const areaW = W / 2;
+        const cols = 7, rows = 5, gap = 4;
+        const bw = (areaW - 48 - (cols - 1) * gap) / cols;
+        const sideBricks = [];
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < cols; col++) {
+                const tnt = level === 3 && row === col - 1;
+                sideBricks.push({
+                    x: x0 + 24 + col * (bw + gap),
+                    y: 92 + row * (BRICK_HEIGHT + gap),
+                    w: bw, h: BRICK_HEIGHT,
+                    hp: 1, maxHp: 1, alive: true, hitFlash: 0, tnt,
+                });
+            }
+        }
+        const p = { x: x0 + (areaW - 92) / 2, y: H - 48, w: 92, h: PADDLE_HEIGHT };
+        return {
+            index, x0, areaW, paddle: p, bricks: sideBricks,
+            ball: { x: p.x + p.w / 2, y: p.y - BALL_RADIUS - 1, r: BALL_RADIUS, vx: 0, vy: 0, trail: [] },
+            lives: MAX_LIVES, score: 0,
+        };
+    }
+
+    function initDuel() {
+        duel = { sides: [createDuelSide(0), createDuelSide(1)], winner: 0 };
+        state = 'serving';
+        stage.classList.remove('playing');
+    }
+
+    function resetDuelBall(side) {
+        side.ball.x = side.paddle.x + side.paddle.w / 2;
+        side.ball.y = side.paddle.y - side.ball.r - 1;
+        side.ball.vx = 0;
+        side.ball.vy = 0;
+        side.ball.trail = [];
+    }
+
+    function launchDuel() {
+        if (!duel) return;
+        for (const side of duel.sides) {
+            if (side.ball.vx === 0 && side.ball.vy === 0) {
+                const speed = ballSpeedFor(level);
+                const a = rand(55, 125) * Math.PI / 180;
+                side.ball.vx = Math.cos(a) * speed;
+                side.ball.vy = -Math.sin(a) * speed;
+            }
+        }
+        state = 'playing';
+        stage.classList.add('playing');
+        SFX.launch();
+    }
+
+    function finishDuel(winnerIndex, reason) {
+        if (!duel || duel.winner) return;
+        duel.winner = winnerIndex;
+        state = 'gameover';
+        stage.classList.remove('playing');
+        SFX.clear();
+        const winner = duel.sides[winnerIndex - 1];
+        modalTitle.textContent = `🏆 玩家 ${winnerIndex} 获胜`;
+        modalSub.textContent = reason;
+        modalScore.textContent = `${duel.sides[0].score} : ${duel.sides[1].score}`;
+        modalLevel.textContent = level;
+        modalHighScore.textContent = winner.score;
+        btnRestart.textContent = '再战一局';
+        modalBox.classList.remove('record');
+        modalOverlay.classList.add('active');
+    }
+
+    function hitDuelBrick(side, brick, ball) {
+        brick.alive = false;
+        side.score += brick.tnt ? 100 : 50;
+        spawnBrickParticles(brick);
+        if (brick.tnt) {
+            const cx = brick.x + brick.w / 2, cy = brick.y + brick.h / 2;
+            spawnExplosion(cx, cy);
+            shake = Math.max(shake, 12);
+            SFX.boom();
+            for (const b of side.bricks) {
+                if (!b.alive) continue;
+                const bx = b.x + b.w / 2, by = b.y + b.h / 2;
+                if (Math.hypot(bx - cx, by - cy) <= TNT_RADIUS) {
+                    b.alive = false;
+                    side.score += 50;
+                    spawnBrickParticles(b);
+                }
+            }
+        } else SFX.brick(1, 0);
+        if (side.bricks.every(b => !b.alive)) finishDuel(side.index + 1, '率先清空全部砖块');
+    }
+
+    function updateDuelBall(side, dt) {
+        const ball = side.ball;
+        if (ball.vx === 0 && ball.vy === 0) {
+            ball.x = side.paddle.x + side.paddle.w / 2;
+            ball.y = side.paddle.y - ball.r - 1;
+            return;
+        }
+        const steps = Math.max(1, Math.ceil(Math.hypot(ball.vx, ball.vy) * dt / 5));
+        const sdt = dt / steps;
+        for (let s = 0; s < steps; s++) {
+            ball.x += ball.vx * sdt;
+            ball.y += ball.vy * sdt;
+            const left = side.x0, right = side.x0 + side.areaW;
+            if (ball.x - ball.r < left) { ball.x = left + ball.r; ball.vx = Math.abs(ball.vx); }
+            if (ball.x + ball.r > right) { ball.x = right - ball.r; ball.vx = -Math.abs(ball.vx); }
+            if (ball.y - ball.r < 0) { ball.y = ball.r; ball.vy = Math.abs(ball.vy); }
+            if (ball.y - ball.r > H) {
+                side.lives--;
+                if (side.lives <= 0) {
+                    finishDuel(side.index === 0 ? 2 : 1, `玩家 ${side.index + 1} 生命耗尽`);
+                } else {
+                    resetDuelBall(side);
+                    const speed = ballSpeedFor(level);
+                    const a = rand(55, 125) * Math.PI / 180;
+                    side.ball.vx = Math.cos(a) * speed;
+                    side.ball.vy = -Math.sin(a) * speed;
+                }
+                return;
+            }
+            const p = side.paddle;
+            if (ball.vy > 0 && ball.y + ball.r >= p.y && ball.y - ball.r <= p.y + p.h + 5 &&
+                ball.x >= p.x - ball.r && ball.x <= p.x + p.w + ball.r) {
+                const hit = clamp((ball.x - (p.x + p.w / 2)) / (p.w / 2), -1, 1);
+                const sp = Math.hypot(ball.vx, ball.vy);
+                const angle = hit * 60 * Math.PI / 180;
+                ball.vx = sp * Math.sin(angle);
+                ball.vy = -sp * Math.cos(angle);
+                ball.y = p.y - ball.r - 0.5;
+                SFX.paddle();
+            }
+            for (const brick of side.bricks) {
+                if (!brick.alive) continue;
+                const nx = clamp(ball.x, brick.x, brick.x + brick.w);
+                const ny = clamp(ball.y, brick.y, brick.y + brick.h);
+                const dx = ball.x - nx, dy = ball.y - ny;
+                if (dx * dx + dy * dy < ball.r * ball.r) {
+                    hitDuelBrick(side, brick, ball);
+                    ball.vy = -ball.vy;
+                    break;
+                }
+            }
+        }
+        ball.trail.push({ x: ball.x, y: ball.y });
+        if (ball.trail.length > 8) ball.trail.shift();
+    }
+
+    function updateDuel(dt) {
+        if (!duel || state === 'gameover') return;
+        const [p1, p2] = duel.sides;
+        if (keys.p1l) p1.paddle.x -= PADDLE_SPEED * dt;
+        if (keys.p1r) p1.paddle.x += PADDLE_SPEED * dt;
+        if (keys.p2l) p2.paddle.x -= PADDLE_SPEED * dt;
+        if (keys.p2r) p2.paddle.x += PADDLE_SPEED * dt;
+        p1.paddle.x = clamp(p1.paddle.x, p1.x0, p1.x0 + p1.areaW - p1.paddle.w);
+        p2.paddle.x = clamp(p2.paddle.x, p2.x0, p2.x0 + p2.areaW - p2.paddle.w);
+        if (state === 'playing') {
+            updateDuelBall(p1, dt);
+            updateDuelBall(p2, dt);
+        } else {
+            updateDuelBall(p1, 0);
+            updateDuelBall(p2, 0);
+        }
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i]; p.life -= dt;
+            if (p.life <= 0) { particles.splice(i, 1); continue; }
+            p.x += p.vx * dt; p.y += p.vy * dt; p.vy += 600 * dt;
+        }
+        for (let i = rings.length - 1; i >= 0; i--) {
+            const r = rings[i]; r.life -= dt;
+            if (r.life <= 0) { rings.splice(i, 1); continue; }
+            r.r += (r.maxR - r.r) * Math.min(1, dt * 12);
+        }
+        shake = Math.max(0, shake - dt * 40);
+    }
+
     // ================= 主更新 =================
     function update(dt) {
+        if (twoPlayer) { updateDuel(dt); return; }
         // 拍宽缓动
         paddle.w += (paddle.targetW - paddle.w) * Math.min(1, dt * 10);
 
@@ -1556,9 +1738,12 @@
         // 道具计时
         if (expandTimer > 0) {
             expandTimer -= dt;
-            if (expandTimer <= 0) paddle.targetW = basePaddleWidth();
+            if (expandTimer <= 0 && shrinkTimer <= 0) paddle.targetW = basePaddleWidth();
         }
-        if (hasteTimer > 0) hasteTimer -= dt;
+        if (shrinkTimer > 0) {
+            shrinkTimer -= dt;
+            if (shrinkTimer <= 0 && expandTimer <= 0) paddle.targetW = basePaddleWidth();
+        }
         if (freezeTimer > 0) freezeTimer -= dt;
         if (paddleFlash > 0) paddleFlash -= dt;
 
@@ -1739,12 +1924,12 @@
     function drawPaddle() {
         const { x, y, w, h } = paddle;
         ctx.save();
-        ctx.shadowColor = freezeTimer > 0 ? '#b8ecff' : '#38d9ff';
+        ctx.shadowColor = freezeTimer > 0 ? '#b8ecff' : shrinkTimer > 0 ? '#ff5566' : '#38d9ff';
         ctx.shadowBlur = 14;
         const g = ctx.createLinearGradient(x, y, x, y + h);
-        g.addColorStop(0, freezeTimer > 0 ? '#e7f8ff' : '#aee9ff');
-        g.addColorStop(0.45, freezeTimer > 0 ? '#74c0fc' : '#38d9ff');
-        g.addColorStop(1, freezeTimer > 0 ? '#2878b5' : '#1470a8');
+        g.addColorStop(0, freezeTimer > 0 ? '#e7f8ff' : shrinkTimer > 0 ? '#ffc2c8' : '#aee9ff');
+        g.addColorStop(0.45, freezeTimer > 0 ? '#74c0fc' : shrinkTimer > 0 ? '#ff7785' : '#38d9ff');
+        g.addColorStop(1, freezeTimer > 0 ? '#2878b5' : shrinkTimer > 0 ? '#a82834' : '#1470a8');
         ctx.fillStyle = g;
         roundRect(ctx, x, y, w, h, h / 2);
         ctx.fill();
@@ -1780,12 +1965,13 @@
             ctx.fill();
         }
 
-        // 加宽倒计时
-        if (expandTimer > 0) {
-            ctx.fillStyle = 'rgba(77,171,247,0.9)';
+        // 宽度变化倒计时
+        const widthTimer = expandTimer > 0 ? expandTimer : shrinkTimer;
+        if (widthTimer > 0) {
+            ctx.fillStyle = shrinkTimer > 0 ? '#ff7785' : 'rgba(77,171,247,0.9)';
             ctx.font = 'bold 11px "Segoe UI", sans-serif';
             ctx.textAlign = 'center';
-            ctx.fillText(Math.ceil(expandTimer) + 's', x + w / 2, y - 5);
+            ctx.fillText(Math.ceil(widthTimer) + 's', x + w / 2, y - 5);
         }
         if (edgeBoost) {
             ctx.fillStyle = '#7cf7b0';
@@ -1940,6 +2126,73 @@
         ctx.globalAlpha = 1;
     }
 
+    function drawDuelPaddle(p, color) {
+        ctx.save();
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = color;
+        roundRect(ctx, p.x, p.y, p.w, p.h, p.h / 2);
+        ctx.fill();
+        ctx.restore();
+    }
+
+    function drawDuelBall(ball, color) {
+        for (let i = 0; i < ball.trail.length; i++) {
+            const t = ball.trail[i];
+            ctx.globalAlpha = (i / ball.trail.length) * 0.35;
+            ctx.fillStyle = color;
+            ctx.beginPath(); ctx.arc(t.x, t.y, ball.r * 0.7, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+        ctx.save(); ctx.shadowColor = color; ctx.shadowBlur = 14;
+        ctx.fillStyle = '#fff';
+        ctx.beginPath(); ctx.arc(ball.x, ball.y, ball.r, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+    }
+
+    function drawDuel() {
+        if (!duel) return;
+        ctx.save();
+        // 分屏中线
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        ctx.fillRect(W / 2 - 1, 0, 2, H);
+        const colors = ['#38d9ff', '#b197fc'];
+        for (const side of duel.sides) {
+            const color = colors[side.index];
+            ctx.fillStyle = side.index === 0 ? 'rgba(56,217,255,0.025)' : 'rgba(177,151,252,0.025)';
+            ctx.fillRect(side.x0, 0, side.areaW, H);
+            ctx.font = 'bold 16px "Segoe UI", "PingFang SC", sans-serif';
+            ctx.textBaseline = 'top';
+            ctx.textAlign = side.index === 0 ? 'left' : 'right';
+            ctx.fillStyle = color;
+            const tx = side.index === 0 ? side.x0 + 14 : side.x0 + side.areaW - 14;
+            ctx.fillText(`P${side.index + 1}  ${side.index === 0 ? 'A / D' : '← / →'}`, tx, 12);
+            ctx.font = '13px "Segoe UI", sans-serif';
+            ctx.fillText(`❤️ ${side.lives}   分数 ${side.score}`, tx, 37);
+            for (const b of side.bricks) {
+                if (!b.alive) continue;
+                if (b.tnt) drawTntBrick(b);
+                else {
+                    ctx.fillStyle = color;
+                    roundRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.fill();
+                    ctx.fillStyle = 'rgba(255,255,255,0.18)';
+                    roundRect(ctx, b.x + 2, b.y + 2, b.w - 4, b.h * 0.3, 3); ctx.fill();
+                }
+            }
+            drawDuelPaddle(side.paddle, color);
+            drawDuelBall(side.ball, color);
+        }
+        if (state === 'serving') {
+            ctx.fillStyle = 'rgba(4,8,16,0.55)'; ctx.fillRect(0, 0, W, H);
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 26px "Segoe UI", "PingFang SC", sans-serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText('双人分屏对战', W / 2, H / 2 - 20);
+            ctx.fillStyle = '#8ea3c6'; ctx.font = '15px "Segoe UI", "PingFang SC", sans-serif';
+            ctx.fillText('空格发球 · 先清砖或耗尽对手生命者获胜', W / 2, H / 2 + 22);
+        }
+        ctx.restore();
+    }
+
     function drawBuffBar() {
         const entries = Object.entries(buffs);
         if (!entries.length) return;
@@ -1991,6 +2244,12 @@
             ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
         }
 
+        if (twoPlayer) {
+            drawDuel();
+            ctx.restore();
+            return;
+        }
+
         // 死亡线
         ctx.strokeStyle = 'rgba(255,107,129,0.18)';
         ctx.setLineDash([8, 8]);
@@ -2021,7 +2280,7 @@
             ctx.fillStyle = 'rgba(108,130,165,0.8)';
             ctx.fillText(`剩余砖块 ${alive}`, 14, H - 12);
             const status = [];
-            if (hasteTimer > 0) status.push({ text: `≫ 球加速 ${Math.ceil(hasteTimer)}s`, color: '#ff9f43' });
+            if (shrinkTimer > 0) status.push({ text: `✂ 变窄 ${Math.ceil(shrinkTimer)}s`, color: '#ff7785' });
             if (freezeTimer > 0) status.push({ text: `❄ 冻结 ${freezeTimer.toFixed(1)}s`, color: '#74c0fc' });
             ctx.textAlign = 'right';
             status.forEach((s, i) => {
@@ -2098,11 +2357,16 @@
     function primaryAction() {
         ensureAudio();
         if (state === 'serving') {
+            if (twoPlayer) { launchDuel(); return; }
             launchBalls();
             state = 'playing';
             stage.classList.add('playing');
         } else if (state === 'paused') {
-            state = balls.some(b => b.vx || b.vy) ? 'playing' : 'serving';
+            if (twoPlayer && duel) {
+                state = duel.sides.some(s => s.ball.vx || s.ball.vy) ? 'playing' : 'serving';
+            } else {
+                state = balls.some(b => b.vx || b.vy) ? 'playing' : 'serving';
+            }
             lastTime = performance.now();
         }
     }
@@ -2113,6 +2377,11 @@
     }
     function movePaddleTo(clientX) {
         if (state !== 'playing' && state !== 'serving' && state !== 'menu') return;
+        if (twoPlayer && duel) {
+            const p = duel.sides[0].paddle;
+            p.x = clamp(pointerToCanvasX(clientX) - p.w / 2, 0, W / 2 - p.w);
+            return;
+        }
         if (freezeTimer > 0) return;
         paddle.x = clamp(pointerToCanvasX(clientX) - paddle.w / 2, 0, W - paddle.w);
     }
@@ -2356,7 +2625,8 @@
         bricks = createBricks(level);
         powerups = []; particles = []; floatTexts = [];
         rings = [];
-        resetBallsToPaddle();
+        if (twoPlayer) initDuel();
+        else { duel = null; resetBallsToPaddle(); }
         hideStartPanel();
         draftPanel.classList.remove('active');
         modalOverlay.classList.remove('active');
@@ -2364,12 +2634,16 @@
         updateScoreUI(); updateLivesUI(); updateLevelUI();
         state = 'serving';
         lastTime = performance.now();
-        saveGame();                    // 开局即写入存档位
+        if (!twoPlayer) saveGame();    // 对战为独立比赛，不覆盖单人关卡存档
     }
     function restart() {
         const slot = currentSlot || 1;
-        const checkpoint = readSlot(slot);
-        startGame(slot, checkpoint);             // 死亡后从最近的三关检查点继续
+        if (twoPlayer) {
+            startGame(slot, { level, score: 0, lives: MAX_LIVES, buffs: {}, twoPlayer: true });
+        } else {
+            const checkpoint = readSlot(slot);
+            startGame(slot, checkpoint);         // 单人死亡后从最近的三关检查点继续
+        }
         window.focus();
     }
 

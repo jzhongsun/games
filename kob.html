@@ -1,0 +1,2387 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>砖块王 · Brick King</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --bg-deep: #070b14;
+            --panel: #0d1524;
+            --panel-edge: #1c2b45;
+            --text: #dbe7ff;
+            --text-dim: #6c82a5;
+            --gold: #ffd93d;
+            --accent: #38d9ff;
+        }
+        body {
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background:
+                radial-gradient(1200px 700px at 50% -10%, #12203a 0%, var(--bg-deep) 60%),
+                var(--bg-deep);
+            font-family: 'Segoe UI', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            user-select: none;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #game-wrapper {
+            background: linear-gradient(180deg, var(--panel), #0a1120);
+            border: 1px solid var(--panel-edge);
+            border-radius: 20px;
+            padding: 18px 20px 20px 20px;
+            box-shadow: 0 30px 80px rgba(0,0,0,0.75), 0 0 0 1px rgba(56,217,255,0.05);
+        }
+
+        /* ===== 顶栏 ===== */
+        #header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            padding: 2px 4px 14px 4px;
+            flex-wrap: wrap;
+        }
+        .game-title {
+            font-size: 22px;
+            font-weight: 800;
+            letter-spacing: 2px;
+            background: linear-gradient(120deg, #38d9ff, #7c9cff 55%, #b197fc);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .game-title small {
+            font-size: 11px;
+            font-weight: 500;
+            letter-spacing: 4px;
+            color: var(--text-dim);
+            -webkit-text-fill-color: var(--text-dim);
+            display: block;
+            margin-top: 1px;
+        }
+        .hud {
+            display: flex;
+            align-items: center;
+            gap: 22px;
+        }
+        .hud-item { display: flex; flex-direction: column; align-items: center; gap: 1px; }
+        .hud-item .hud-label {
+            font-size: 10px;
+            letter-spacing: 3px;
+            color: var(--text-dim);
+            text-transform: uppercase;
+        }
+        .hud-item .hud-value {
+            font-size: 19px;
+            font-weight: 700;
+            font-variant-numeric: tabular-nums;
+            color: var(--text);
+            min-width: 44px;
+            text-align: center;
+        }
+        .hud-item .hud-value.gold { color: var(--gold); }
+        .hud-item .hud-value.accent { color: var(--accent); }
+        .lives-display { display: flex; gap: 3px; font-size: 16px; min-height: 24px; align-items: center; }
+        .lives-display .heart { transition: 0.25s; }
+        .lives-display .heart.lost { filter: grayscale(1); opacity: 0.25; transform: scale(0.8); }
+        #btn-mute {
+            background: var(--panel);
+            border: 1px solid var(--panel-edge);
+            border-radius: 10px;
+            width: 36px; height: 36px;
+            font-size: 16px;
+            cursor: pointer;
+            color: var(--text-dim);
+            display: flex; align-items: center; justify-content: center;
+            transition: 0.2s;
+        }
+        #btn-mute:hover { color: var(--text); border-color: #2e4368; }
+
+        /* ===== 画布 ===== */
+        #game-stage {
+            position: relative;
+            border-radius: 14px;
+            overflow: hidden;
+            border: 1px solid #16233c;
+        }
+        #gameCanvas {
+            display: block;
+            width: 800px;
+            height: 600px;
+            background: #060a12;
+            touch-action: none;
+        }
+        #game-stage.playing #gameCanvas { cursor: none; }
+
+        /* ===== 开始界面 / 存档选择 ===== */
+        #start-panel {
+            position: absolute;
+            inset: 0;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            background: rgba(4,8,16,0.55);
+            backdrop-filter: blur(3px);
+            z-index: 10;
+        }
+        #start-panel.active { display: flex; }
+        .start-card {
+            background: linear-gradient(180deg, rgba(16,26,46,0.96), rgba(11,18,32,0.96));
+            border: 1px solid #22355a;
+            border-radius: 16px;
+            padding: 28px 32px 24px 32px;
+            width: 340px;
+            max-width: 92%;
+            text-align: center;
+            color: var(--text);
+            box-shadow: 0 24px 60px rgba(0,0,0,0.6);
+        }
+        .start-title {
+            font-size: 30px;
+            font-weight: 800;
+            letter-spacing: 4px;
+            background: linear-gradient(120deg, #38d9ff, #7c9cff 55%, #b197fc);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .start-sub {
+            font-size: 10px;
+            letter-spacing: 6px;
+            color: var(--text-dim);
+            margin: 4px 0 20px 0;
+        }
+        .start-buttons { display: flex; flex-direction: column; gap: 10px; }
+        .btn-primary, .btn-secondary {
+            border: none;
+            border-radius: 10px;
+            padding: 12px 0;
+            font-size: 15px;
+            font-weight: 700;
+            letter-spacing: 2px;
+            cursor: pointer;
+            transition: 0.18s;
+            font-family: inherit;
+        }
+        .btn-primary {
+            background: linear-gradient(135deg, #38d9ff, #6f8dff);
+            color: #06121f;
+            box-shadow: 0 6px 18px rgba(56,217,255,0.22);
+        }
+        .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 10px 26px rgba(56,217,255,0.32); }
+        .btn-secondary {
+            background: #141f36;
+            border: 1px solid var(--panel-edge);
+            color: var(--text);
+        }
+        .btn-secondary:hover { border-color: #2e4368; }
+        .slot-list { display: flex; flex-direction: column; gap: 8px; }
+        .slot-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: #101a2e;
+            border: 1px solid var(--panel-edge);
+            border-radius: 10px;
+            padding: 10px 14px;
+            cursor: pointer;
+            transition: 0.15s;
+            color: var(--text);
+            font-family: inherit;
+            text-align: left;
+            width: 100%;
+        }
+        .slot-item:hover:not(:disabled) { border-color: var(--accent); background: #12203a; }
+        .slot-item:disabled { opacity: 0.4; cursor: not-allowed; }
+        .slot-item .slot-badge {
+            flex: none;
+            width: 26px; height: 26px;
+            border-radius: 50%;
+            background: #1a2946;
+            border: 1px solid #2a3f66;
+            font-size: 13px; font-weight: 800;
+            display: flex; align-items: center; justify-content: center;
+            color: var(--accent);
+        }
+        .slot-item .slot-info { flex: 1; min-width: 0; }
+        .slot-item .slot-line1 { font-size: 14px; font-weight: 600; }
+        .slot-item .slot-line2 { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+        .slot-item .slot-action { flex: none; font-size: 12px; color: var(--accent); font-weight: 700; }
+        .btn-back {
+            margin-top: 12px;
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            font-size: 13px;
+            cursor: pointer;
+            font-family: inherit;
+        }
+        .btn-back:hover { color: var(--text); }
+        .start-hint { margin-top: 16px; font-size: 12px; color: var(--text-dim); }
+        .start-hint span { color: var(--gold); font-weight: 700; }
+        .hidden { display: none !important; }
+
+        /* ===== 抽卡界面 ===== */
+        #draft-panel {
+            position: absolute;
+            inset: 0;
+            display: none;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            background: rgba(4,8,16,0.72);
+            backdrop-filter: blur(4px);
+            z-index: 11;
+        }
+        #draft-panel.active { display: flex; }
+        .draft-card-wrap { text-align: center; width: 92%; max-width: 620px; }
+        .draft-title { font-size: 26px; font-weight: 800; color: var(--text); letter-spacing: 2px; }
+        .draft-sub { font-size: 13px; color: var(--text-dim); margin: 8px 0 20px 0; }
+        .draft-cards {
+            display: flex;
+            justify-content: center;
+            gap: 14px;
+            flex-wrap: wrap;
+        }
+        .buff-card {
+            --c: #38d9ff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            width: 158px;
+            padding: 18px 12px 14px 12px;
+            background: linear-gradient(180deg, rgba(20,32,56,0.97), rgba(12,19,34,0.97));
+            border: 2px solid var(--c);
+            border-radius: 14px;
+            cursor: pointer;
+            color: var(--text);
+            font-family: inherit;
+            transition: 0.16s;
+            box-shadow: 0 0 0 rgba(0,0,0,0), 0 10px 24px rgba(0,0,0,0.4);
+        }
+        .buff-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 0 26px color-mix(in srgb, var(--c) 35%, transparent), 0 14px 30px rgba(0,0,0,0.5);
+        }
+        .buff-card .buff-icon { font-size: 34px; line-height: 1; }
+        .buff-card .buff-name { font-size: 16px; font-weight: 800; letter-spacing: 1px; }
+        .buff-card .buff-lv {
+            font-size: 12px;
+            font-weight: 700;
+            padding: 2px 10px;
+            border-radius: 20px;
+            background: rgba(56,217,255,0.12);
+            color: var(--c);
+            border: 1px solid var(--c);
+        }
+        .buff-card .buff-lv.owned { background: rgba(255,217,61,0.10); border-color: var(--gold); color: var(--gold); }
+        .buff-card .buff-desc { font-size: 12px; color: var(--text-dim); line-height: 1.5; min-height: 36px; }
+        .buff-card.discardable:hover {
+            border-color: #ff5566;
+            box-shadow: 0 0 26px rgba(255,85,102,0.35), 0 14px 30px rgba(0,0,0,0.5);
+        }
+        .draft-hint { margin-top: 18px; font-size: 13px; color: var(--text-dim); }
+
+        /* ===== 开发者秘籍弹窗 ===== */
+        #dev-panel {
+            position: fixed;
+            inset: 0;
+            display: none;
+            justify-content: center;
+            align-items: center;
+            background: rgba(3,6,12,0.6);
+            backdrop-filter: blur(4px);
+            z-index: 1000;
+        }
+        #dev-panel.active { display: flex; }
+        .dev-box {
+            width: 400px;
+            max-width: 92%;
+            max-height: 90vh;
+            overflow-y: auto;
+            background: linear-gradient(180deg, #101a2e, #0b1220);
+            border: 1px solid #2a3f66;
+            border-radius: 14px;
+            padding: 0 0 16px 0;
+            color: var(--text);
+            box-shadow: 0 30px 80px rgba(0,0,0,0.8);
+            animation: modalIn 0.25s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+        }
+        .dev-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 16px;
+            border-bottom: 1px solid #1c2b45;
+            font-weight: 800;
+            letter-spacing: 1px;
+            font-size: 15px;
+        }
+        .dev-head .dev-tag {
+            font-size: 10px;
+            letter-spacing: 3px;
+            color: #ff9f43;
+            border: 1px solid #ff9f43;
+            border-radius: 20px;
+            padding: 2px 8px;
+            margin-left: 8px;
+        }
+        #dev-close {
+            background: none;
+            border: none;
+            color: var(--text-dim);
+            font-size: 16px;
+            cursor: pointer;
+            padding: 2px 6px;
+            transition: 0.15s;
+        }
+        #dev-close:hover { color: #ff8fa3; }
+        .dev-section { padding: 12px 16px 0 16px; }
+        .dev-label { font-size: 11px; letter-spacing: 2px; color: var(--text-dim); margin-bottom: 8px; }
+        .dev-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+        #dev-level-input {
+            width: 84px;
+            background: #0d1524;
+            border: 1px solid #1c2b45;
+            color: var(--text);
+            border-radius: 8px;
+            padding: 8px 10px;
+            font-family: inherit;
+            font-size: 14px;
+        }
+        .dev-btn {
+            background: #141f36;
+            border: 1px solid #2a3f66;
+            color: var(--text);
+            border-radius: 8px;
+            padding: 8px 14px;
+            cursor: pointer;
+            font-family: inherit;
+            font-size: 13px;
+            transition: 0.15s;
+        }
+        .dev-btn:hover { border-color: var(--accent); }
+        .dev-btn.danger { border-color: #a8324a; color: #ff8fa3; }
+        .dev-btn.danger:hover { border-color: #ff5566; }
+        .dev-buffs { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 8px; }
+        .dev-buff-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #0d1524;
+            border: 1px solid #1c2b45;
+            border-radius: 8px;
+            padding: 5px 8px;
+            font-size: 12.5px;
+        }
+        .dev-buff-row .dev-buff-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .dev-stepper { display: flex; align-items: center; gap: 5px; flex: none; }
+        .dev-stepper button {
+            width: 22px; height: 22px;
+            border-radius: 6px;
+            background: #1a2946;
+            border: 1px solid #2a3f66;
+            color: var(--text);
+            cursor: pointer;
+            font-size: 13px;
+            line-height: 1;
+            padding: 0;
+        }
+        .dev-stepper button:hover { border-color: var(--accent); }
+        .dev-stepper .dev-lv { min-width: 30px; text-align: center; font-weight: 700; color: var(--gold); }
+        .dev-toggle { display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 13px; }
+        .dev-toggle input { accent-color: #ff9f43; width: 15px; height: 15px; }
+        .dev-footer { padding: 14px 16px 0 16px; display: flex; flex-direction: column; gap: 8px; }
+        .dev-tip { font-size: 11px; color: var(--text-dim); text-align: center; }
+
+        /* ===== 模式选择 & 全屏 ===== */
+        .mode-select { display: flex; gap: 8px; margin-bottom: 12px; }
+        .mode-btn {
+            flex: 1;
+            background: #141f36;
+            border: 1px solid var(--panel-edge);
+            border-radius: 10px;
+            padding: 10px 0;
+            font-family: inherit;
+            font-size: 14px;
+            font-weight: 700;
+            letter-spacing: 1px;
+            color: var(--text-dim);
+            cursor: pointer;
+            transition: 0.15s;
+        }
+        .mode-btn.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            background: rgba(56,217,255,0.08);
+        }
+        #btn-fullscreen {
+            background: var(--panel);
+            border: 1px solid var(--panel-edge);
+            border-radius: 10px;
+            width: 36px; height: 36px;
+            font-size: 15px;
+            cursor: pointer;
+            color: var(--text-dim);
+            display: flex; align-items: center; justify-content: center;
+            transition: 0.2s;
+        }
+        #btn-fullscreen:hover { color: var(--text); border-color: #2e4368; }
+        #game-wrapper:fullscreen {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-radius: 0;
+            padding: 16px;
+            background: #070b14;
+            overflow: auto;
+        }
+        #game-wrapper:fullscreen #gameCanvas {
+            width: min(96vw, calc(86vh * 4 / 3));
+            height: auto;
+        }
+
+        /* ===== 底部快捷键提示 ===== */
+        #footer {
+            display: flex;
+            justify-content: center;
+            gap: 18px;
+            padding-top: 12px;
+            font-size: 12px;
+            color: var(--text-dim);
+            flex-wrap: wrap;
+        }
+        #footer kbd {
+            background: #141f36;
+            border: 1px solid var(--panel-edge);
+            border-bottom-width: 2px;
+            border-radius: 5px;
+            padding: 1px 7px;
+            font-family: inherit;
+            font-size: 11px;
+            color: var(--text);
+            margin-right: 4px;
+        }
+
+        /* ===== 弹窗 ===== */
+        #modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(3,6,12,0.7);
+            backdrop-filter: blur(6px);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 999;
+        }
+        #modal-overlay.active { display: flex; }
+        #modal-box {
+            background: linear-gradient(180deg, #101a2e, #0b1220);
+            border: 1px solid #22355a;
+            border-radius: 18px;
+            padding: 36px 44px 38px 44px;
+            max-width: 430px;
+            width: 90%;
+            text-align: center;
+            color: var(--text);
+            box-shadow: 0 40px 90px rgba(0,0,0,0.8);
+            animation: modalIn 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+        }
+        @keyframes modalIn {
+            from { transform: scale(0.9) translateY(14px); opacity: 0; }
+            to   { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        #modal-box.record { border-color: var(--gold); box-shadow: 0 0 50px rgba(255,217,61,0.15), 0 40px 90px rgba(0,0,0,0.8); }
+        #modal-box .modal-title { font-size: 28px; font-weight: 800; letter-spacing: 1px; }
+        #modal-box .modal-title .crown { color: var(--gold); }
+        #modal-box .modal-sub { color: var(--text-dim); font-size: 13px; margin: 8px 0 24px 0; letter-spacing: 1px; }
+        .modal-stats {
+            display: flex;
+            justify-content: space-around;
+            margin: 0 0 28px 0;
+            padding: 16px 8px;
+            background: rgba(255,255,255,0.03);
+            border: 1px solid var(--panel-edge);
+            border-radius: 12px;
+        }
+        .modal-stats .stat-item { display: flex; flex-direction: column; gap: 4px; }
+        .modal-stats .stat-label { font-size: 11px; letter-spacing: 2px; color: var(--text-dim); }
+        .modal-stats .stat-value { font-size: 26px; font-weight: 800; color: var(--gold); font-variant-numeric: tabular-nums; }
+        .modal-stats .stat-value.plain { color: var(--text); }
+        #btn-restart {
+            background: linear-gradient(135deg, #38d9ff, #6f8dff);
+            border: none;
+            padding: 13px 44px;
+            border-radius: 12px;
+            font-size: 16px;
+            font-weight: 700;
+            color: #06121f;
+            cursor: pointer;
+            transition: 0.2s;
+            letter-spacing: 2px;
+            box-shadow: 0 8px 24px rgba(56,217,255,0.25);
+        }
+        #btn-restart:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(56,217,255,0.35); }
+        #modal-hint { margin-top: 14px; font-size: 11px; color: var(--text-dim); }
+
+        @media (max-width: 860px) {
+            #game-wrapper { padding: 12px; border-radius: 14px; }
+            #gameCanvas { width: 100%; height: auto; aspect-ratio: 800/600; }
+            .game-title { font-size: 18px; }
+            .hud { gap: 14px; }
+        }
+        @media (max-width: 500px) {
+            #header { flex-direction: column; align-items: stretch; }
+            .hud { justify-content: space-between; }
+        }
+    </style>
+</head>
+<body>
+<div id="game-wrapper">
+    <div id="header">
+        <div class="game-title">砖块王<small>BRICK&nbsp;KING</small></div>
+        <div class="hud">
+            <div class="hud-item">
+                <span class="hud-label">关卡</span>
+                <span class="hud-value accent" id="levelValue">1</span>
+            </div>
+            <div class="hud-item">
+                <span class="hud-label">分数</span>
+                <span class="hud-value" id="currentScore">0</span>
+            </div>
+            <div class="hud-item">
+                <span class="hud-label">最高分</span>
+                <span class="hud-value gold" id="highScore">0</span>
+            </div>
+            <div class="hud-item">
+                <span class="hud-label">生命</span>
+                <span class="lives-display" id="livesDisplay"></span>
+            </div>
+            <button id="btn-fullscreen" title="全屏 (F)">⛶</button>
+            <button id="btn-mute" title="静音 (M)">🔊</button>
+        </div>
+    </div>
+    <div id="game-stage">
+        <canvas id="gameCanvas" width="800" height="600"></canvas>
+        <div id="start-panel" class="active">
+            <div class="start-card">
+                <div class="start-title">砖块王</div>
+                <div class="start-sub">BRICK&nbsp;KING</div>
+                <div class="mode-select" id="modeSelect">
+                    <button class="mode-btn active" id="mode-1p" type="button">👤 单人</button>
+                    <button class="mode-btn" id="mode-2p" type="button">👥 双人</button>
+                </div>
+                <div class="start-buttons" id="startButtons">
+                    <button class="btn-primary" id="btn-new">🆕 新游戏</button>
+                    <button class="btn-secondary" id="btn-load">📂 读取存档</button>
+                </div>
+                <div class="slot-list hidden" id="slotList"></div>
+                <button class="btn-back hidden" id="btn-back">← 返回</button>
+                <div class="start-hint">🏆 最高分 <span id="menuHighScore">0</span></div>
+            </div>
+        </div>
+        <div id="draft-panel">
+            <div class="draft-card-wrap">
+                <div class="draft-title" id="draft-title">✨ 选择一张强化卡</div>
+                <div class="draft-sub" id="draft-sub"></div>
+                <div class="draft-cards" id="draft-cards"></div>
+                <div class="draft-hint" id="draft-hint"></div>
+            </div>
+        </div>
+    </div>
+    <div id="footer">
+        <span><kbd>A</kbd><kbd>D</kbd>P1 · <kbd>←</kbd><kbd>→</kbd>P2/单人</span>
+        <span><kbd>空格</kbd>发射</span>
+        <span><kbd>P</kbd>暂停</span>
+        <span><kbd>Q</kbd>返回菜单</span>
+        <span><kbd>F</kbd>全屏</span>
+        <span><kbd>M</kbd>静音</span>
+    </div>
+</div>
+
+<div id="modal-overlay">
+    <div id="modal-box">
+        <div class="modal-title" id="modalTitle">💥 游戏结束</div>
+        <div class="modal-sub" id="modalSub">砖块王 · 再接再厉</div>
+        <div class="modal-stats">
+            <div class="stat-item">
+                <span class="stat-label">本轮分数</span>
+                <span class="stat-value" id="modalScore">0</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">到达关卡</span>
+                <span class="stat-value plain" id="modalLevel">1</span>
+            </div>
+            <div class="stat-item">
+                <span class="stat-label">历史最高</span>
+                <span class="stat-value" id="modalHighScore">0</span>
+            </div>
+        </div>
+        <button id="btn-restart">再来一局</button>
+        <div class="modal-hint">按 R 键快速重开</div>
+        <button id="btn-menu" class="btn-back">🏠 返回主菜单</button>
+    </div>
+</div>
+
+<div id="dev-panel">
+    <div class="dev-box">
+        <div class="dev-head">
+            <span>🛠 开发者秘籍<span class="dev-tag">KOB MODE</span></span>
+            <button id="dev-close" title="关闭">✕</button>
+        </div>
+        <div class="dev-section">
+            <div class="dev-label">关卡选择</div>
+            <div class="dev-row">
+                <input type="number" id="dev-level-input" min="1" max="999" value="1" />
+                <button id="dev-level-jump" class="dev-btn">跳转关卡</button>
+            </div>
+        </div>
+        <div class="dev-section">
+            <div class="dev-label">卡片自定义（实时生效）</div>
+            <div id="dev-buffs" class="dev-buffs"></div>
+        </div>
+        <div class="dev-section">
+            <div class="dev-label">快捷秘籍</div>
+            <div class="dev-row">
+                <button id="dev-half" class="dev-btn">💥 消失一半砖块</button>
+                <label class="dev-toggle"><input type="checkbox" id="dev-infinite" /> ♾ 无限生命</label>
+            </div>
+        </div>
+        <div class="dev-footer">
+            <button id="dev-reset" class="dev-btn danger">关闭全部秘籍效果</button>
+            <div class="dev-tip">关闭方式：✕ 按钮 · Esc · 再次输入 KOB · 点击遮罩</div>
+        </div>
+    </div>
+</div>
+
+<script>
+(function() {
+    'use strict';
+
+    // ================= 配置 =================
+    const W = 800, H = 600;
+    const COLS = 10;
+    const BRICK_ROWS_BASE = 5;
+    const BRICK_ROWS_MAX = 8;
+    const BRICK_AREA_RATIO = 0.88;
+    const BRICK_HEIGHT = 24;
+    const BRICK_GAP = 5;
+    const AREA_TOP = 64;
+
+    const BALL_RADIUS = 9;
+    const BALL_SPEED_BASE = 330;
+    const BALL_SPEED_PER_LEVEL = 16;
+    const BALL_SPEED_MAX = 580;
+    const PADDLE_SPEED = 640;
+    const PADDLE_HEIGHT = 14;
+    const PADDLE_WIDTH_BASE = 110;
+    const PADDLE_EXPAND_FACTOR = 1.55;
+    const MAX_LIVES = 3;
+    const LIVES_CAP = 3;
+    const COMBO_MAX = 8;
+
+    const DROP_CHANCE = 0.22;
+    const POWERUP_SPEED = 150;
+    const POWERUP_SIZE = 30;
+
+    // TNT 爆炸砖
+    const TNT_RADIUS = 135;                                  // 爆炸波及半径
+    const TNT_CHANCE_BASE = 0.04;                            // 出现率随关卡提升
+    const TNT_CHANCE_PER_LEVEL = 0.005;
+    const TNT_CHANCE_MAX = 0.12;
+
+    const EXPAND_TIME = 10;
+    const SHRINK_TIME = 8;
+    const SHRINK_FACTOR = 0.62;
+    const FREEZE_TIME = 1.5;         // 平台冻结时长
+
+    // 按血量等级的砖块配色（霓虹系）
+    const TIER_COLORS = [
+        null,
+        { top: '#3ddc97', bottom: '#1f9d6b' },  // 1 血
+        { top: '#4dabf7', bottom: '#2b7fd4' },  // 2 血
+        { top: '#b197fc', bottom: '#7d5cd6' },  // 3 血
+        { top: '#ff8787', bottom: '#d94848' },  // 4 血
+    ];
+    const ROW_TINT = ['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.05)', 'rgba(0,0,0,0.05)',
+                      'rgba(0,0,0,0.10)', 'rgba(0,0,0,0.14)', 'rgba(0,0,0,0.18)'];
+
+    const POWER_TYPES = {
+        expand: { label: '↔', color: '#4dabf7', name: '加宽球拍', weight: 28 },
+        multi:  { label: '✦', color: '#ffd43b', name: '多球分裂', weight: 26 },
+        life:   { label: '❤', color: '#ff6b81', name: '额外生命', weight: 9  },
+        score:  { label: '★', color: '#f783ac', name: '加分 300', weight: 16 },
+        // —— 负面道具：深色胶囊，要主动躲 ——
+        shrink: { label: '✂', color: '#ff5566', name: '球拍变窄！', weight: 11, bad: true },
+        freeze: { label: '❄', color: '#74c0fc', name: '平台冻结！', weight: 11, bad: true },
+    };
+
+    // 连击反馈阈值
+    const COMBO_FIRE = 3;      // 火焰拖尾
+    const COMBO_HOT = 5;       // 球变色（炽蓝）
+    const COMBO_GOLD = 8;      // 金球 + 全屏金光
+    const COMBO_SPEED_STEP = 0.035;   // 每级连击的球速加成
+    const EDGE_ZONE = 0.85;    // 贴边区域：|击球位置| > 0.85（外侧 15%）
+
+    // ================= 抽卡强化池 =================
+    const MAX_BUFF_LV = 5;     // 单个强化最高级
+    const MAX_BUFF_KINDS = 5;  // 最多同时持有 5 种强化
+    const BUFF_DEFS = {
+        wide:   { icon: '🏓', name: '宽体球拍', color: '#4dabf7', desc: lv => `球拍宽度 +${16 * lv}%` },
+        ball:   { icon: '🟠', name: '巨石强球', color: '#ffd43b', desc: lv => `球体半径 +${12 * lv}%` },
+        magnet: { icon: '🧲', name: '道具磁力', color: '#b197fc', desc: lv => `道具会被吸向球拍（范围 ${45 * lv}px）` },
+        lucky:  { icon: '🍀', name: '幸运之星', color: '#3ddc97', desc: lv => `道具掉落率 +${5 * lv}%` },
+        combo:  { icon: '🔥', name: '连击大师', color: '#ff9f43', desc: lv => `破砖得分 +${20 * lv}%` },
+        edge:   { icon: '🎯', name: '贴边专家', color: '#7cf7b0', desc: lv => `贴边区域扩大（触发更易）` },
+        score:  { icon: '⭐', name: '点金之手', color: '#f783ac', desc: lv => `全部得分 +${15 * lv}%` },
+    };
+
+    // ================= DOM =================
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+    const stage = document.getElementById('game-stage');
+    const levelValueEl = document.getElementById('levelValue');
+    const livesDisplay = document.getElementById('livesDisplay');
+    const currentScoreEl = document.getElementById('currentScore');
+    const highScoreEl = document.getElementById('highScore');
+    const btnMute = document.getElementById('btn-mute');
+    const modalOverlay = document.getElementById('modal-overlay');
+    const modalBox = document.getElementById('modal-box');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalSub = document.getElementById('modalSub');
+    const modalScore = document.getElementById('modalScore');
+    const modalLevel = document.getElementById('modalLevel');
+    const modalHighScore = document.getElementById('modalHighScore');
+    const btnRestart = document.getElementById('btn-restart');
+    const startPanel = document.getElementById('start-panel');
+    const startButtons = document.getElementById('startButtons');
+    const slotList = document.getElementById('slotList');
+    const btnNew = document.getElementById('btn-new');
+    const btnLoad = document.getElementById('btn-load');
+    const btnBack = document.getElementById('btn-back');
+    const menuHighScoreEl = document.getElementById('menuHighScore');
+    const draftPanel = document.getElementById('draft-panel');
+    const draftTitle = document.getElementById('draft-title');
+    const draftSub = document.getElementById('draft-sub');
+    const draftCards = document.getElementById('draft-cards');
+    const draftHint = document.getElementById('draft-hint');
+    const devPanel = document.getElementById('dev-panel');
+    const devClose = document.getElementById('dev-close');
+    const devLevelInput = document.getElementById('dev-level-input');
+    const devLevelJump = document.getElementById('dev-level-jump');
+    const devBuffsEl = document.getElementById('dev-buffs');
+    const devHalf = document.getElementById('dev-half');
+    const devInfinite = document.getElementById('dev-infinite');
+    const devReset = document.getElementById('dev-reset');
+    const btnFullscreen = document.getElementById('btn-fullscreen');
+    const mode1p = document.getElementById('mode-1p');
+    const mode2p = document.getElementById('mode-2p');
+    const gameWrapper = document.getElementById('game-wrapper');
+
+    // ================= 几何 =================
+    const brickAreaWidth = W * BRICK_AREA_RATIO;
+    const brickAreaLeft = (W - brickAreaWidth) / 2;
+    const brickWidth = (brickAreaWidth - (COLS - 1) * BRICK_GAP) / COLS;
+
+    // ================= 状态 =================
+    let bricks = [];
+    let balls = [];
+    let powerups = [];
+    let particles = [];
+    let floatTexts = [];
+    let paddle = { x: 0, y: H - 52, w: PADDLE_WIDTH_BASE, h: PADDLE_HEIGHT, targetW: PADDLE_WIDTH_BASE };
+    let lives = MAX_LIVES;
+    let score = 0;
+    let level = 1;
+    let combo = 0;
+    let highScore = parseInt(localStorage.getItem('brickKingHighScore') || '0', 10) || 0;
+    let state = 'menu';               // menu | serving | playing | paused | levelclear | gameover
+    let currentSlot = 0;              // 当前使用的存档位（1~3，0 = 未选择）
+    let muted = false;
+    let animId = null;
+    let lastTime = 0;
+    let shake = 0;
+    let flashAlpha = 0;
+    let expandTimer = 0;
+    let shrinkTimer = 0;            // 负面：球拍变窄剩余时间
+    let freezeTimer = 0;            // 负面：平台冻结剩余时间
+    let edgeBoost = false;          // 贴边奖励：破砖得分 ×2（持续到下次触拍）
+    let paddleFlash = 0;            // 贴边击球时球拍闪白
+    let levelClearTimer = 0;
+    let buffs = {};                 // 当前持有强化 { id: 等级 }
+    let pendingBuff = null;         // 增益已满时待入队的新强化
+    let rings = [];                 // 爆炸冲击波圆环特效
+    // 开发者秘籍
+    let devOpen = false;            // 秘籍弹窗是否打开
+    let infiniteLives = false;      // ♾ 无限生命
+    let devBuffer = '';             // 键盘序列缓冲（检测 KOB）
+    const keys = { p1l: false, p1r: false, p2l: false, p2r: false };
+    // 双人模式：P1 底部球拍（A/D），P2 顶部球拍（←/->）
+    let twoPlayer = false;
+    let menuTwoPlayer = false;      // 主菜单中的模式选择
+    const paddle2 = { x: 0, y: 26, w: PADDLE_WIDTH_BASE, h: PADDLE_HEIGHT };
+
+    // ================= 音效 (Web Audio) =================
+    let audioCtx = null;
+    function ensureAudio() {
+        try {
+            if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        } catch (_) {}
+    }
+    function tone(freq, duration, type = 'sine', volume = 0.12, delay = 0) {
+        if (muted) return;
+        try {
+            ensureAudio();
+            if (!audioCtx) return;
+            const t0 = audioCtx.currentTime + delay;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(freq, t0);
+            gain.gain.setValueAtTime(volume, t0);
+            gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(t0); osc.stop(t0 + duration);
+        } catch (_) {}
+    }
+    const SFX = {
+        launch()  { tone(660, 0.1, 'sine', 0.12); tone(990, 0.12, 'sine', 0.10, 0.07); },
+        brick(hp, cmb) { tone(440 + Math.min(cmb, COMBO_GOLD) * 55 + hp * 30, 0.07, 'square', 0.08); },
+        wall()    { tone(300, 0.05, 'sine', 0.06); },
+        paddle()  { tone(430, 0.06, 'sine', 0.09); },
+        edge()    { tone(1180, 0.08, 'sine', 0.12); tone(1560, 0.10, 'sine', 0.10, 0.06); },
+        bad()     { tone(160, 0.22, 'sawtooth', 0.13); tone(120, 0.3, 'sawtooth', 0.10, 0.1); },
+        power()   { tone(880, 0.09, 'sine', 0.11); tone(1320, 0.12, 'sine', 0.09, 0.08); },
+        boom()    { tone(90, 0.35, 'sawtooth', 0.20); tone(60, 0.5, 'sawtooth', 0.16, 0.05); tone(240, 0.08, 'square', 0.10); },
+        lose()    { tone(220, 0.3, 'sawtooth', 0.13); tone(140, 0.4, 'sawtooth', 0.10, 0.12); },
+        over()    { tone(400, 0.2, 'square', 0.10); tone(300, 0.2, 'square', 0.10, 0.16); tone(180, 0.5, 'square', 0.10, 0.32); },
+        clear()   { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.18, 'sine', 0.11, i * 0.11)); },
+    };
+
+    // ================= 工具 =================
+    const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+    const rand = (a, b) => Math.random() * (b - a) + a;
+    const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+    function ballSpeedFor(lv) { return Math.min(BALL_SPEED_BASE + (lv - 1) * BALL_SPEED_PER_LEVEL, BALL_SPEED_MAX); }
+
+    // ================= 强化相关辅助 =================
+    function buffLv(id) { return buffs[id] || 0; }
+    function buffCount() { return Object.keys(buffs).length; }
+    function basePaddleWidth() { return PADDLE_WIDTH_BASE * (1 + 0.16 * buffLv('wide')); }
+    function currentTargetW() {
+        return basePaddleWidth() * (expandTimer > 0 ? PADDLE_EXPAND_FACTOR : shrinkTimer > 0 ? SHRINK_FACTOR : 1);
+    }
+    function edgeZone() { return Math.max(0.6, EDGE_ZONE - 0.05 * buffLv('edge')); }
+    function ballRadiusNow() { return BALL_RADIUS * (1 + 0.12 * buffLv('ball')); }
+    function dropChanceNow() { return Math.min(0.6, DROP_CHANCE + 0.05 * buffLv('lucky')); }
+    function addScore(n) {
+        const added = Math.round(n * (1 + 0.15 * buffLv('score')));
+        score += added;
+        updateScoreUI();
+        return added;
+    }
+
+    // ================= 关卡生成 =================
+    // 通过不同排布模式让每一关有节奏变化
+    function createBricks(lv) {
+        if (lv === 3) return createTntChallenge();
+        const rows = Math.min(BRICK_ROWS_BASE + Math.floor((lv - 1) / 2), BRICK_ROWS_MAX);
+        const pattern = (lv - 1) % 4;   // 0 满排 / 1 棋盘 / 2 金字塔 / 3 条纹
+        const maxHp = lv >= 7 ? 4 : lv >= 4 ? 3 : lv >= 2 ? 2 : 1;
+        const tntChance = Math.min(TNT_CHANCE_BASE + lv * TNT_CHANCE_PER_LEVEL, TNT_CHANCE_MAX);
+        const result = [];
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < COLS; col++) {
+                let place = true;
+                if (pattern === 1) place = (row + col) % 2 === 0;
+                else if (pattern === 2) place = Math.abs(col - (COLS - 1) / 2) <= row + 1.5;
+                else if (pattern === 3) place = row % 2 === 0 || col % 2 === 0;
+                if (!place) continue;
+                const tnt = Math.random() < tntChance;
+                // 越靠上的砖越硬（TNT 一击即爆，不吃硬度）
+                const hardness = (rows - row) / rows;                 // 1 顶部 → 0 底部
+                let hp = 1;
+                if (!tnt) {
+                    if (hardness > 0.75 && maxHp >= 2) hp = Math.min(maxHp, 2);
+                    if (hardness > 0.90 && maxHp >= 3) hp = Math.min(maxHp, 3);
+                    if (hardness > 0.96 && maxHp >= 4) hp = 4;
+                }
+                result.push({
+                    x: brickAreaLeft + col * (brickWidth + BRICK_GAP),
+                    y: AREA_TOP + row * (BRICK_HEIGHT + BRICK_GAP),
+                    w: brickWidth, h: BRICK_HEIGHT,
+                    hp, maxHp: hp, alive: true, hitFlash: 0, tnt,
+                });
+            }
+        }
+        return result;
+    }
+
+    // 第 3 关专属：中央 TNT 连锁，周围普通砖被炸后只掉负面道具
+    function createTntChallenge() {
+        const rows = 7;
+        const result = [];
+        const tntCells = new Set([
+            '1,2', '2,3', '3,4', '4,5', '5,6', '6,7',
+        ]);
+        for (let row = 0; row < rows; row++) {
+            for (let col = 0; col < COLS; col++) {
+                const key = `${row},${col}`;
+                const tnt = tntCells.has(key);
+                result.push({
+                    x: brickAreaLeft + col * (brickWidth + BRICK_GAP),
+                    y: AREA_TOP + row * (BRICK_HEIGHT + BRICK_GAP),
+                    w: brickWidth, h: BRICK_HEIGHT,
+                    hp: 1, maxHp: 1, alive: true, hitFlash: 0, tnt,
+                    badDrop: !tnt,                 // 周围砖只产生负面效果
+                });
+            }
+        }
+        return result;
+    }
+
+    // ================= 球 =================
+    function makeBall(x, y, vx, vy) {
+        return { x, y, r: ballRadiusNow(), vx, vy, trail: [] };
+    }
+    function resetBallsToPaddle() {
+        const speed = ballSpeedFor(level);
+        const b = makeBall(paddle.x + paddle.w / 2, paddle.y - BALL_RADIUS - 1, 0, 0);
+        b.speed = speed;
+        balls = [b];
+    }
+    function launchBalls() {
+        let launched = false;
+        for (const b of balls) {
+            if (b.vx === 0 && b.vy === 0) {
+                const a = rand(50, 130) * Math.PI / 180;
+                b.vx = b.speed * Math.cos(a);
+                b.vy = -b.speed * Math.sin(a);
+                launched = true;
+            }
+        }
+        if (launched) SFX.launch();
+        return launched;
+    }
+
+    // ================= 道具 =================
+    function maybeDropPowerup(brick) {
+        const forcedBad = brick.badDrop;
+        if (!forcedBad && Math.random() > dropChanceNow()) return;
+        // 第 3 关 TNT 周围砖 100% 掉负面技能；其他关按常规权重
+        const entries = Object.entries(POWER_TYPES).filter(([, v]) => !forcedBad || v.bad);
+        const total = entries.reduce((s, [, v]) => s + v.weight, 0);
+        let roll = Math.random() * total;
+        let type = entries[0][0];
+        for (const [k, v] of entries) {
+            roll -= v.weight;
+            if (roll <= 0) { type = k; break; }
+        }
+        powerups.push({
+            x: brick.x + brick.w / 2,
+            y: brick.y + brick.h / 2,
+            type, t: 0,
+        });
+    }
+    function applyPowerup(type) {
+        const info = POWER_TYPES[type];
+        addFloatText(paddle.x + paddle.w / 2, paddle.y - 24, info.name, info.color, 16);
+        if (info.bad) {
+            SFX.bad();
+            shake = Math.max(shake, 8);
+        } else {
+            SFX.power();
+        }
+        if (type === 'expand') {
+            shrinkTimer = 0;
+            expandTimer = EXPAND_TIME;
+            paddle.targetW = basePaddleWidth() * PADDLE_EXPAND_FACTOR;
+        } else if (type === 'shrink') {
+            expandTimer = 0;
+            shrinkTimer = SHRINK_TIME;
+            paddle.targetW = basePaddleWidth() * SHRINK_FACTOR;
+        } else if (type === 'multi') {
+            const src = balls.filter(b => b.vx !== 0 || b.vy !== 0);
+            const base = src.length ? src : balls;
+            const additions = [];
+            for (const b of base) {
+                if (balls.length + additions.length >= 6) break;
+                const sp = Math.hypot(b.vx, b.vy) || ballSpeedFor(level);
+                const a = Math.atan2(b.vy, b.vx);
+                for (const da of [-0.5, 0.5]) {
+                    if (balls.length + additions.length >= 6) break;
+                    additions.push(makeBall(b.x, b.y, Math.cos(a + da) * sp, Math.sin(a + da) * sp));
+                }
+            }
+            for (const nb of additions) nb.speed = ballSpeedFor(level);
+            balls.push(...additions);
+        } else if (type === 'freeze') {
+            freezeTimer = FREEZE_TIME;                // 平台冻结（仅底部球拍）
+        } else if (type === 'life') {
+            if (lives < LIVES_CAP) { lives++; updateLivesUI(); }
+            else addScore(200);
+        } else if (type === 'score') {
+            addScore(300);
+        }
+    }
+
+    // ================= 特效 =================
+    function spawnBrickParticles(brick) {
+        const color = TIER_COLORS[clamp(brick.maxHp, 1, 4)];
+        for (let i = 0; i < 12; i++) {
+            particles.push({
+                x: brick.x + rand(0, brick.w),
+                y: brick.y + rand(0, brick.h),
+                vx: rand(-160, 160), vy: rand(-220, 40),
+                size: rand(2, 5),
+                color: Math.random() < 0.7 ? color.top : '#ffffff',
+                life: rand(0.4, 0.8), maxLife: 0.8,
+            });
+        }
+    }
+    function addFloatText(x, y, text, color, size = 15) {
+        floatTexts.push({ x, y, text, color, size, life: 1 });
+    }
+
+    // ================= UI =================
+    function updateLivesUI() {
+        const total = LIVES_CAP;
+        let html = '';
+        for (let i = 0; i < total; i++) {
+            html += `<span class="heart ${i < lives ? '' : 'lost'}">❤️</span>`;
+        }
+        livesDisplay.innerHTML = html;
+    }
+    function updateScoreUI() {
+        currentScoreEl.textContent = score;
+        highScoreEl.textContent = Math.max(highScore, score);
+    }
+    function updateLevelUI() { levelValueEl.textContent = level; }
+
+    // ================= 生命 / 结束 =================
+    function loseLife() {
+        if (infiniteLives) {           // ♾ 无限生命：始终保持满血，只重置球
+            lives = MAX_LIVES;
+            updateLivesUI();
+            resetBallsToPaddle();
+            state = 'serving';
+            stage.classList.remove('playing');
+            SFX.wall();
+            return;
+        }
+        lives--;
+        combo = 0;
+        edgeBoost = false;
+        flashAlpha = 0.7;
+        shake = 14;
+        updateLivesUI();
+        SFX.lose();
+        if (lives <= 0) { gameOver(); return; }
+        resetBallsToPaddle();
+        state = 'serving';
+        stage.classList.remove('playing');
+    }
+
+    function gameOver() {
+        state = 'gameover';
+        balls = [];
+        stage.classList.remove('playing');
+        SFX.over();
+        let isRecord = false;
+        if (score > highScore) {
+            highScore = score;
+            localStorage.setItem('brickKingHighScore', String(highScore));
+            isRecord = true;
+        }
+        // 死亡不清除存档：可从最近的三关检查点继续
+        modalTitle.innerHTML = isRecord ? '<span class="crown">👑</span> 新纪录！' : '💥 游戏结束';
+        modalSub.textContent = isRecord ? '砖块王 · 你刷新了最高分' : '砖块王 · 再接再厉';
+        modalScore.textContent = score;
+        modalLevel.textContent = level;
+        modalHighScore.textContent = highScore;
+        btnRestart.textContent = '从检查点继续';
+        modalBox.classList.toggle('record', isRecord);
+        modalOverlay.classList.add('active');
+        updateScoreUI();
+    }
+
+    function nextLevel() {
+        level++;
+        updateLevelUI();
+        bricks = createBricks(level);
+        expandTimer = shrinkTimer = freezeTimer = 0;
+        edgeBoost = false;
+        paddle.targetW = basePaddleWidth();
+        paddle2.x = (W - paddle2.w) / 2;
+        powerups = [];
+        resetBallsToPaddle();
+        state = 'serving';
+        // 每 3 关设置检查点：完成 3/6/9... 关后，进入下一关时覆盖当前存档
+        if ((level - 1) % 3 === 0) saveGame();
+    }
+
+    // ================= 抽卡系统（每关通关后三选一） =================
+    function openDraft() {
+        state = 'draft';
+        stage.classList.remove('playing');
+        // 候选：未满级的强化（已持有的会升级）
+        const pool = Object.keys(BUFF_DEFS).filter(id => buffLv(id) < MAX_BUFF_LV);
+        const picks = [];
+        while (picks.length < 3 && pool.length) {
+            picks.push(pool.splice(randInt(0, pool.length - 1), 1)[0]);
+        }
+        renderDraft(picks);
+        draftPanel.classList.add('active');
+        SFX.power();
+    }
+
+    function buffCardEl(id, mode) {          // mode: 'draft' | 'discard'
+        const def = BUFF_DEFS[id];
+        const lv = buffLv(id);
+        const el = document.createElement('button');
+        el.className = 'buff-card';
+        el.style.setProperty('--c', def.color);
+        const icon = document.createElement('div');
+        icon.className = 'buff-icon';
+        icon.textContent = def.icon;
+        const name = document.createElement('div');
+        name.className = 'buff-name';
+        name.textContent = def.name;
+        const lvEl = document.createElement('div');
+        lvEl.className = 'buff-lv';
+        if (mode === 'discard') {
+            lvEl.textContent = 'Lv.' + lv;
+            lvEl.classList.add('owned');
+        } else if (lv > 0) {
+            lvEl.textContent = `Lv.${lv} ▸ Lv.${lv + 1}`;
+            lvEl.classList.add('owned');
+        } else {
+            lvEl.textContent = '新强化';
+        }
+        const desc = document.createElement('div');
+        desc.className = 'buff-desc';
+        desc.textContent = def.desc(mode === 'discard' ? lv : lv + 1);
+        el.append(icon, name, lvEl, desc);
+        return el;
+    }
+
+    function renderDraft(picks) {
+        draftTitle.textContent = '✨ 选择一张强化卡';
+        draftSub.textContent = `第 ${level} 关通过 · 同一卡片重复选择可继续升级`;
+        draftHint.textContent = buffCount() >= MAX_BUFF_KINDS
+            ? '⚠ 增益已满 5 种：选择新卡片后需舍弃一张'
+            : `当前增益 ${buffCount()}/${MAX_BUFF_KINDS} 种`;
+        draftCards.innerHTML = '';
+        for (const id of picks) {
+            const el = buffCardEl(id, 'draft');
+            el.addEventListener('click', () => pickBuff(id));
+            draftCards.appendChild(el);
+        }
+    }
+
+    function pickBuff(id) {
+        ensureAudio();
+        if (buffLv(id) > 0) {                 // 已持有：直接升级，不占新槽位
+            buffs[id] = buffLv(id) + 1;
+            onBuffGained(id);
+            finishDraft();
+        } else if (buffCount() < MAX_BUFF_KINDS) {
+            buffs[id] = 1;
+            onBuffGained(id);
+            finishDraft();
+        } else {
+            pendingBuff = id;                 // 已满 5 种：先舍弃一张
+            renderDiscard();
+            SFX.bad();
+        }
+    }
+
+    function renderDiscard() {
+        draftTitle.textContent = '⚠ 增益已满';
+        draftSub.textContent = `「${BUFF_DEFS[pendingBuff].name}」已入队 · 舍弃一张旧卡为新卡腾出位置`;
+        draftHint.textContent = '点击要舍弃的强化';
+        draftCards.innerHTML = '';
+        for (const id of Object.keys(buffs)) {
+            const el = buffCardEl(id, 'discard');
+            el.classList.add('discardable');
+            el.addEventListener('click', () => {
+                delete buffs[id];
+                buffs[pendingBuff] = 1;
+                pendingBuff = null;
+                SFX.clear();
+                finishDraft();
+            });
+            draftCards.appendChild(el);
+        }
+    }
+
+    // 强化生效时的即时刷新
+    function onBuffGained(id) {
+        SFX.clear();
+        if (id === 'wide') paddle.targetW = currentTargetW();
+        if (id === 'ball') for (const b of balls) b.r = ballRadiusNow();
+    }
+
+    function finishDraft() {
+        draftPanel.classList.remove('active');
+        pendingBuff = null;
+        nextLevel();
+    }
+
+    // ================= 存档系统（3 个存档位） =================
+    const SLOT_COUNT = 3;
+    function slotKey(i) { return 'brickKingSave_' + i; }
+    function readSlot(i) {
+        try {
+            const raw = localStorage.getItem(slotKey(i));
+            if (!raw) return null;
+            const d = JSON.parse(raw);
+            if (!d || typeof d.level !== 'number') return null;
+            return d;
+        } catch (_) { return null; }
+    }
+    function saveGame() {
+        if (!currentSlot) return;
+        try {
+            localStorage.setItem(slotKey(currentSlot), JSON.stringify({
+                level, score, lives, buffs, twoPlayer, ts: Date.now(),
+            }));
+        } catch (_) {}
+    }
+    function clearSlot(i) {
+        try { localStorage.removeItem(slotKey(i)); } catch (_) {}
+    }
+    function formatSlotTime(ts) {
+        const d = new Date(ts);
+        const p = (n) => String(n).padStart(2, '0');
+        return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}:${p(d.getMinutes())}`;
+    }
+
+    // 渲染存档位列表；mode: 'new' | 'load'
+    function renderSlots(mode) {
+        slotList.innerHTML = '';
+        for (let i = 1; i <= SLOT_COUNT; i++) {
+            const data = readSlot(i);
+            const btn = document.createElement('button');
+            btn.className = 'slot-item';
+            const badge = document.createElement('span');
+            badge.className = 'slot-badge';
+            badge.textContent = i;
+            const info = document.createElement('span');
+            info.className = 'slot-info';
+            if (data) {
+                info.innerHTML =
+                    `<span class="slot-line1">第 ${data.level} 关 · ${data.score} 分 · ❤${data.lives}</span>` +
+                    `<span class="slot-line2">${formatSlotTime(data.ts)}</span>`;
+            } else {
+                info.innerHTML = '<span class="slot-line1">空存档位</span><span class="slot-line2">--</span>';
+            }
+            const action = document.createElement('span');
+            action.className = 'slot-action';
+            if (mode === 'new') {
+                action.textContent = data ? '覆盖 ▸' : '开始 ▸';
+                btn.title = data ? '将覆盖该存档' : '';
+            } else {
+                action.textContent = data ? '继续 ▸' : '无存档';
+                if (!data) btn.disabled = true;
+            }
+            btn.append(badge, info, action);
+            btn.addEventListener('click', () => {
+                ensureAudio();
+                if (mode === 'new') {
+                    startGame(i, null);
+                } else if (data) {
+                    startGame(i, data);
+                }
+            });
+            slotList.appendChild(btn);
+        }
+    }
+
+    function showStartPanel() {
+        state = 'menu';
+        balls = [];
+        stage.classList.remove('playing');
+        modalOverlay.classList.remove('active');
+        draftPanel.classList.remove('active');
+        startPanel.classList.add('active');
+        // 重置为主菜单视图
+        startButtons.classList.remove('hidden');
+        slotList.classList.add('hidden');
+        btnBack.classList.add('hidden');
+        menuHighScoreEl.textContent = highScore;
+    }
+    function showSlotPicker(mode) {
+        startButtons.classList.add('hidden');
+        slotList.classList.remove('hidden');
+        btnBack.classList.remove('hidden');
+        renderSlots(mode);
+    }
+    function hideStartPanel() {
+        startPanel.classList.remove('active');
+    }
+
+    // ================= 碰撞 =================
+    // 销毁一块砖（直接击碎或爆炸波及共用）
+    function killBrick(brick, hx, hy) {
+        brick.alive = false;
+        combo = Math.min(combo + 1, COMBO_MAX);
+        let gain = 50 + (combo - 1) * 15 + (brick.maxHp - 1) * 20;
+        gain *= 1 + 0.2 * buffLv('combo');                 // 连击大师
+        if (edgeBoost) gain *= 2;                          // 贴边奖励：得分 ×2
+        const added = addScore(gain);
+        addFloatText(brick.x + brick.w / 2, brick.y + brick.h / 2,
+            '+' + added + (edgeBoost ? ' ×2' : ''),
+            edgeBoost ? '#7cf7b0' : combo >= COMBO_FIRE ? '#ffd43b' : '#dbe7ff',
+            edgeBoost || combo >= COMBO_FIRE ? 17 : 14);
+        if (combo >= COMBO_FIRE) addFloatText(hx, hy - 18, 'COMBO ×' + combo, '#ffd43b', 15);
+        spawnBrickParticles(brick);
+        maybeDropPowerup(brick);
+        shake = Math.max(shake, combo >= COMBO_GOLD ? 5 : 3);
+    }
+
+    // TNT 爆炸：波及半径内砖块全部摧毁，TNT 之间连锁引爆
+    function explodeAt(tntBrick) {
+        const queue = [tntBrick];
+        while (queue.length) {
+            const b = queue.shift();
+            const cx = b.x + b.w / 2, cy = b.y + b.h / 2;
+            spawnExplosion(cx, cy);
+            shake = Math.max(shake, 16);
+            flashAlpha = Math.max(flashAlpha, 0.25);
+            SFX.boom();
+            for (const other of bricks) {
+                if (!other.alive) continue;
+                const ox = other.x + other.w / 2, oy = other.y + other.h / 2;
+                if (Math.hypot(ox - cx, oy - cy) <= TNT_RADIUS) {
+                    if (other.tnt) {
+                        other.alive = false;               // 先标记，入队后自行引爆
+                        queue.push(other);
+                    } else {
+                        killBrick(other, ox, oy);
+                    }
+                }
+            }
+        }
+    }
+
+    function spawnExplosion(x, y) {
+        // 冲击波圆环
+        rings.push({ x, y, r: 8, maxR: TNT_RADIUS + 25, life: 0.35, maxLife: 0.35 });
+        // 爆炸粒子
+        for (let i = 0; i < 30; i++) {
+            const a = rand(0, Math.PI * 2);
+            const sp = rand(80, 460);
+            particles.push({
+                x, y,
+                vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+                size: rand(3, 7),
+                color: ['#ff6b35', '#ffd93d', '#ff5566', '#ffffff'][randInt(0, 3)],
+                life: rand(0.35, 0.85), maxLife: 0.85,
+            });
+        }
+    }
+
+    function hitBrick(brick, ball) {
+        brick.hp--;
+        brick.hitFlash = 0.12;
+        if (brick.hp <= 0) {
+            killBrick(brick, ball.x, ball.y);
+            if (brick.tnt) {
+                explodeAt(brick);                          // TNT：爆炸 + 连锁
+            } else {
+                SFX.brick(brick.maxHp, combo);             // 音高随连击递进
+            }
+        } else {
+            addScore(edgeBoost ? 20 : 10);
+            SFX.brick(brick.hp, combo);
+        }
+        // 反弹：按重叠量决定方向
+        const cx = brick.x + brick.w / 2, cy = brick.y + brick.h / 2;
+        const dx = ball.x - cx, dy = ball.y - cy;
+        const overlapX = (brick.w / 2 + ball.r) - Math.abs(dx);
+        const overlapY = (brick.h / 2 + ball.r) - Math.abs(dy);
+        if (overlapX < overlapY) {
+            ball.vx = -ball.vx;
+            ball.x = dx > 0 ? brick.x + brick.w + ball.r : brick.x - ball.r;
+        } else {
+            ball.vy = -ball.vy;
+            ball.y = dy > 0 ? brick.y + brick.h + ball.r : brick.y - ball.r;
+        }
+        // 防止水平死循环
+        const sp = Math.hypot(ball.vx, ball.vy);
+        if (Math.abs(ball.vy) < sp * 0.22) {
+            ball.vy = (ball.vy >= 0 ? 1 : -1) * sp * 0.22;
+            ball.vx = Math.sign(ball.vx || 1) * Math.sqrt(Math.max(sp * sp - ball.vy * ball.vy, 0));
+        }
+    }
+
+    function updateBalls(dt) {
+        // 球速修正：连击滚雪球提速
+        const comboMul = 1 + Math.min(combo, COMBO_MAX) * COMBO_SPEED_STEP;
+        const moveMul = comboMul;
+        for (let bi = balls.length - 1; bi >= 0; bi--) {
+            const ball = balls[bi];
+            if (ball.vx === 0 && ball.vy === 0) continue;   // 待发射
+
+            // 子步进防穿模
+            const dist = Math.hypot(ball.vx, ball.vy) * dt * moveMul;
+            const steps = Math.max(1, Math.ceil(dist / 5));
+            const sdt = dt * moveMul / steps;
+            let dead = false;
+
+            for (let s = 0; s < steps && !dead; s++) {
+                ball.x += ball.vx * sdt;
+                ball.y += ball.vy * sdt;
+
+                // 墙壁（双人模式顶部无墙，由 P2 球拍防守）
+                if (ball.x - ball.r < 0) { ball.x = ball.r; ball.vx = -ball.vx; SFX.wall(); }
+                if (ball.x + ball.r > W) { ball.x = W - ball.r; ball.vx = -ball.vx; SFX.wall(); }
+                if (!twoPlayer && ball.y - ball.r < 0) { ball.y = ball.r; ball.vy = -ball.vy; SFX.wall(); }
+
+                // 落底（双人模式下顶部漏球同样失守）
+                if (ball.y - ball.r > H) { dead = true; break; }
+                if (twoPlayer && ball.y + ball.r < 0) { dead = true; break; }
+
+                // 球拍
+                if (ball.vy > 0 &&
+                    ball.y + ball.r >= paddle.y && ball.y - ball.r <= paddle.y + paddle.h + 6 &&
+                    ball.x >= paddle.x - ball.r && ball.x <= paddle.x + paddle.w + ball.r) {
+                    const hit = clamp((ball.x - (paddle.x + paddle.w / 2)) / (paddle.w / 2), -1, 1);
+                    const sp = Math.hypot(ball.vx, ball.vy);
+                    const angle = hit * 60 * Math.PI / 180;
+                    ball.vx = sp * Math.sin(angle);
+                    ball.vy = -sp * Math.cos(angle);
+                    ball.y = paddle.y - ball.r - 0.5;
+                    if (Math.abs(hit) > edgeZone()) {
+                        // 贴边击球：连击 +1，破砖得分 ×2（持续到下次拍心击球）
+                        combo = Math.min(combo + 1, COMBO_MAX);
+                        edgeBoost = true;
+                        paddleFlash = 0.3;
+                        shake = Math.max(shake, 4);
+                        addFloatText(ball.x, paddle.y - 30, '贴边! ×2', '#7cf7b0', 16);
+                        SFX.edge();
+                    } else {
+                        edgeBoost = false;
+                        combo = 0;                       // 拍心击球重置连击
+                        SFX.paddle();
+                    }
+                }
+
+                // 顶部球拍（双人模式 P2，←/-> 控制）
+                if (twoPlayer && ball.vy < 0 &&
+                    ball.y - ball.r <= paddle2.y + paddle2.h && ball.y + ball.r >= paddle2.y - 6 &&
+                    ball.x >= paddle2.x - ball.r && ball.x <= paddle2.x + paddle2.w + ball.r) {
+                    const hit = clamp((ball.x - (paddle2.x + paddle2.w / 2)) / (paddle2.w / 2), -1, 1);
+                    const sp = Math.hypot(ball.vx, ball.vy);
+                    const angle = hit * 60 * Math.PI / 180;
+                    ball.vx = sp * Math.sin(angle);
+                    ball.vy = sp * Math.cos(angle);          // 反射向下
+                    ball.y = paddle2.y + paddle2.h + ball.r + 0.5;
+                    if (Math.abs(hit) > edgeZone()) {
+                        combo = Math.min(combo + 1, COMBO_MAX);
+                        edgeBoost = true;
+                        addFloatText(ball.x, paddle2.y + paddle2.h + 30, '贴边! ×2', '#7cf7b0', 16);
+                        SFX.edge();
+                    } else {
+                        edgeBoost = false;
+                        combo = 0;
+                        SFX.paddle();
+                    }
+                }
+
+                // 砖块
+                for (const brick of bricks) {
+                    if (!brick.alive) continue;
+                    const nx = clamp(ball.x, brick.x, brick.x + brick.w);
+                    const ny = clamp(ball.y, brick.y, brick.y + brick.h);
+                    const ddx = ball.x - nx, ddy = ball.y - ny;
+                    if (ddx * ddx + ddy * ddy < ball.r * ball.r) {
+                        hitBrick(brick, ball);
+                        break;
+                    }
+                }
+            }
+            if (dead) {
+                // 多球时掉一颗不扣命
+                balls.splice(bi, 1);
+                if (balls.length === 0) { loseLife(); return; }
+                continue;
+            }
+
+            // 轨迹
+            ball.trail.push({ x: ball.x, y: ball.y });
+            if (ball.trail.length > 10) ball.trail.shift();
+        }
+    }
+
+    // ================= 主更新 =================
+    function update(dt) {
+        // 拍宽缓动
+        paddle.w += (paddle.targetW - paddle.w) * Math.min(1, dt * 10);
+
+        // 键盘移动（P1: A/D + 鼠标 底拍；P2: ←/-> 顶拍；单人时方向键也控制底拍）
+        if (state === 'playing' || state === 'serving') {
+            // 冻结道具只锁住接到道具的底部球拍；双人模式的 P2 仍可救场
+            if (freezeTimer <= 0) {
+                if (keys.p1l || (!twoPlayer && keys.p2l)) paddle.x -= PADDLE_SPEED * dt;
+                if (keys.p1r || (!twoPlayer && keys.p2r)) paddle.x += PADDLE_SPEED * dt;
+            }
+            if (twoPlayer) {
+                if (keys.p2l) paddle2.x -= PADDLE_SPEED * dt;
+                if (keys.p2r) paddle2.x += PADDLE_SPEED * dt;
+            }
+        }
+        paddle.x = clamp(paddle.x, 0, W - paddle.w);
+        if (twoPlayer) {
+            paddle2.w = basePaddleWidth();
+            paddle2.x = clamp(paddle2.x, 0, W - paddle2.w);
+        }
+
+        // 待发射球跟随球拍
+        for (const b of balls) {
+            if (b.vx === 0 && b.vy === 0) {
+                b.x = paddle.x + paddle.w / 2;
+                b.y = paddle.y - b.r - 1;
+            }
+        }
+
+        // 道具计时
+        if (expandTimer > 0) {
+            expandTimer -= dt;
+            if (expandTimer <= 0) paddle.targetW = basePaddleWidth();
+        }
+        if (hasteTimer > 0) hasteTimer -= dt;
+        if (freezeTimer > 0) freezeTimer -= dt;
+        if (paddleFlash > 0) paddleFlash -= dt;
+
+        if (state === 'playing') {
+            updateBalls(dt);
+
+            // 接道具（磁力：范围内的道具被吸向球拍）
+            const magnetR = 45 * buffLv('magnet');
+            const pcx = paddle.x + paddle.w / 2, pcy = paddle.y + paddle.h / 2;
+            for (let i = powerups.length - 1; i >= 0; i--) {
+                const p = powerups[i];
+                p.y += POWERUP_SPEED * dt;
+                p.t += dt;
+                if (magnetR > 0) {
+                    const d = Math.hypot(p.x - pcx, p.y - pcy);
+                    if (d < magnetR && d > 1) {
+                        p.x += (pcx - p.x) * Math.min(1, dt * 4);
+                        p.y += (pcy - p.y) * Math.min(1, dt * 2);
+                    }
+                }
+                if (p.y - POWERUP_SIZE / 2 > H) { powerups.splice(i, 1); continue; }
+                if (p.y + POWERUP_SIZE / 2 >= paddle.y && p.y - POWERUP_SIZE / 2 <= paddle.y + paddle.h &&
+                    p.x >= paddle.x - POWERUP_SIZE / 2 && p.x <= paddle.x + paddle.w + POWERUP_SIZE / 2) {
+                    applyPowerup(p.type);
+                    powerups.splice(i, 1);
+                }
+            }
+
+            // 通关判定 -> 进入抽卡阶段
+            if (state === 'playing' && bricks.every(b => !b.alive)) {
+                const bonus = addScore(300 + (level - 1) * 50);
+                addFloatText(W / 2, H / 2 - 40, '通关奖励 +' + bonus, '#ffd43b', 20);
+                SFX.clear();
+                state = 'levelclear';
+                levelClearTimer = 1.6;
+                balls = [];
+                powerups = [];
+            }
+        } else if (state === 'levelclear') {
+            levelClearTimer -= dt;
+            if (levelClearTimer <= 0) openDraft();
+        }
+
+        // 爆炸冲击波圆环
+        for (let i = rings.length - 1; i >= 0; i--) {
+            const r = rings[i];
+            r.life -= dt;
+            if (r.life <= 0) { rings.splice(i, 1); continue; }
+            r.r += (r.maxR - r.r) * Math.min(1, dt * 12);
+        }
+        // 粒子
+        for (let i = particles.length - 1; i >= 0; i--) {
+            const p = particles[i];
+            p.life -= dt;
+            if (p.life <= 0) { particles.splice(i, 1); continue; }
+            p.x += p.vx * dt; p.y += p.vy * dt;
+            p.vy += 600 * dt;
+        }
+        // 浮动文字
+        for (let i = floatTexts.length - 1; i >= 0; i--) {
+            const f = floatTexts[i];
+            f.life -= dt * 1.1;
+            f.y -= 36 * dt;
+            if (f.life <= 0) floatTexts.splice(i, 1);
+        }
+        // 砖块受击闪白
+        for (const b of bricks) if (b.hitFlash > 0) b.hitFlash -= dt;
+
+        shake = Math.max(0, shake - dt * 40);
+        if (flashAlpha > 0) {
+            flashAlpha -= dt * 1.6;
+            if (flashAlpha < 0) flashAlpha = 0;
+        }
+    }
+
+    // ================= 绘制 =================
+    function roundRect(c, x, y, w, h, r) {
+        r = Math.min(r, w / 2, h / 2);
+        c.beginPath();
+        c.moveTo(x + r, y);
+        c.arcTo(x + w, y, x + w, y + h, r);
+        c.arcTo(x + w, y + h, x, y + h, r);
+        c.arcTo(x, y + h, x, y, r);
+        c.arcTo(x, y, x + w, y, r);
+        c.closePath();
+    }
+
+    function drawTntBrick(b) {
+        const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 170 + b.x * 0.05);
+        ctx.save();
+        ctx.shadowColor = '#ff6b35';
+        ctx.shadowBlur = 6 + 10 * pulse;
+        const g = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.h);
+        g.addColorStop(0, '#ff8c42');
+        g.addColorStop(0.55, '#e0522e');
+        g.addColorStop(1, '#8e2418');
+        ctx.fillStyle = g;
+        roundRect(ctx, b.x, b.y, b.w, b.h, 4);
+        ctx.fill();
+        ctx.restore();
+
+        // 斜纹警示带
+        ctx.save();
+        roundRect(ctx, b.x, b.y, b.w, b.h, 4);
+        ctx.clip();
+        ctx.strokeStyle = 'rgba(0,0,0,0.22)';
+        ctx.lineWidth = 5;
+        for (let sx = b.x - b.h; sx < b.x + b.w + b.h; sx += 11) {
+            ctx.beginPath();
+            ctx.moveTo(sx, b.y + b.h + 3);
+            ctx.lineTo(sx + b.h, b.y - 3);
+            ctx.stroke();
+        }
+        ctx.restore();
+
+        // TNT 字样
+        ctx.fillStyle = `rgba(255,255,255,${0.85 + 0.15 * pulse})`;
+        ctx.font = 'bold 11px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('TNT', b.x + b.w / 2, b.y + b.h / 2 + 1);
+
+        ctx.strokeStyle = 'rgba(0,0,0,0.3)';
+        ctx.lineWidth = 1;
+        roundRect(ctx, b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1, 4);
+        ctx.stroke();
+    }
+
+    function drawBricks() {
+        for (const b of bricks) {
+            if (!b.alive) continue;
+            if (b.tnt) { drawTntBrick(b); continue; }
+            const tier = TIER_COLORS[clamp(b.maxHp, 1, 4)];
+            const g = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.h);
+            g.addColorStop(0, tier.top);
+            g.addColorStop(1, tier.bottom);
+            ctx.fillStyle = g;
+            roundRect(ctx, b.x, b.y, b.w, b.h, 4);
+            ctx.fill();
+
+            // 顶部高光
+            ctx.fillStyle = 'rgba(255,255,255,0.22)';
+            roundRect(ctx, b.x + 2, b.y + 2, b.w - 4, b.h * 0.32, 3);
+            ctx.fill();
+
+            // 行次微调明暗，避免整片均一
+            ctx.fillStyle = ROW_TINT[Math.floor(b.y - AREA_TOP) / (BRICK_HEIGHT + BRICK_GAP) % ROW_TINT.length | 0] || 'transparent';
+            roundRect(ctx, b.x, b.y, b.w, b.h, 4);
+            ctx.fill();
+
+            // 受击闪白
+            if (b.hitFlash > 0) {
+                ctx.fillStyle = `rgba(255,255,255,${b.hitFlash * 5})`;
+                roundRect(ctx, b.x, b.y, b.w, b.h, 4);
+                ctx.fill();
+            }
+
+            // 多血砖：底部血量点
+            if (b.maxHp > 1) {
+                const pipW = 7, gap = 3;
+                const totalW = b.hp * pipW + (b.hp - 1) * gap;
+                let px = b.x + (b.w - totalW) / 2;
+                for (let i = 0; i < b.hp; i++) {
+                    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+                    roundRect(ctx, px, b.y + b.h - 6, pipW, 2.5, 1.25);
+                    ctx.fill();
+                    px += pipW + gap;
+                }
+            }
+
+            ctx.strokeStyle = 'rgba(0,0,0,0.25)';
+            ctx.lineWidth = 1;
+            roundRect(ctx, b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1, 4);
+            ctx.stroke();
+        }
+    }
+
+    function drawPaddle() {
+        const { x, y, w, h } = paddle;
+        ctx.save();
+        ctx.shadowColor = freezeTimer > 0 ? '#b8ecff' : '#38d9ff';
+        ctx.shadowBlur = 14;
+        const g = ctx.createLinearGradient(x, y, x, y + h);
+        g.addColorStop(0, freezeTimer > 0 ? '#e7f8ff' : '#aee9ff');
+        g.addColorStop(0.45, freezeTimer > 0 ? '#74c0fc' : '#38d9ff');
+        g.addColorStop(1, freezeTimer > 0 ? '#2878b5' : '#1470a8');
+        ctx.fillStyle = g;
+        roundRect(ctx, x, y, w, h, h / 2);
+        ctx.fill();
+        ctx.restore();
+
+        // 中心能量条：贴边奖励激活时变金色 ×2
+        ctx.fillStyle = edgeBoost ? 'rgba(255, 217, 61, 0.95)' : 'rgba(255,255,255,0.35)';
+        roundRect(ctx, x + w / 2 - 12, y + h / 2 - 1.5, 24, 3, 1.5);
+        ctx.fill();
+        // 贴边提示区（两侧边缘，随「贴边专家」扩大）
+        const ez = Math.max(4, w * (1 - edgeZone()));
+        ctx.fillStyle = edgeBoost ? 'rgba(124, 247, 176, 0.55)' : 'rgba(124, 247, 176, 0.18)';
+        roundRect(ctx, x + 1, y + 2, ez - 2, h - 4, 3);
+        ctx.fill();
+        roundRect(ctx, x + w - ez + 1, y + 2, ez - 2, h - 4, 3);
+        ctx.fill();
+
+        // 冻结覆盖层：冰蓝外壳和雪花标记
+        if (freezeTimer > 0) {
+            ctx.fillStyle = 'rgba(180,235,255,0.55)';
+            roundRect(ctx, x - 2, y - 2, w + 4, h + 4, h / 2 + 2);
+            ctx.fill();
+            ctx.fillStyle = '#e7f8ff';
+            ctx.font = 'bold 13px "Segoe UI", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`❄ ${freezeTimer.toFixed(1)}s`, x + w / 2, y - 6);
+        }
+
+        // 贴边击球闪白
+        if (paddleFlash > 0) {
+            ctx.fillStyle = `rgba(255,255,255,${paddleFlash * 2})`;
+            roundRect(ctx, x, y, w, h, h / 2);
+            ctx.fill();
+        }
+
+        // 加宽倒计时
+        if (expandTimer > 0) {
+            ctx.fillStyle = 'rgba(77,171,247,0.9)';
+            ctx.font = 'bold 11px "Segoe UI", sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(Math.ceil(expandTimer) + 's', x + w / 2, y - 5);
+        }
+        if (edgeBoost) {
+            ctx.fillStyle = '#7cf7b0';
+            ctx.font = 'bold 11px "Segoe UI", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.fillText('×2', x - 4, y + h / 2 + 3);
+        }
+    }
+
+    function ballSkin() {
+        // 连击越高，球越“热”：默认金黄 -> 火焰 -> 炽蓝 -> 全金
+        if (combo >= COMBO_GOLD) return { trail: [255, 230, 120], glow: '#ffe98a', c0: '#ffffff', c1: '#fff3b0', c2: '#ffb020', hot: true };
+        if (combo >= COMBO_HOT)  return { trail: [56, 217, 255], glow: '#38d9ff', c0: '#ffffff', c1: '#9be7ff', c2: '#1e8fd4', hot: true };
+        if (combo >= COMBO_FIRE) return { trail: [255, 140, 60], glow: '#ff8c3c', c0: '#fff4e0', c1: '#ffb36b', c2: '#e05a1a', hot: true };
+        return { trail: [255, 217, 61], glow: '#ffd93d', c0: '#ffffff', c1: '#ffe98a', c2: '#f0a824', hot: false };
+    }
+
+    function drawSecondPaddle() {
+        if (!twoPlayer) return;
+        const { x, y, w, h } = paddle2;
+        ctx.save();
+        ctx.shadowColor = freezeTimer > 0 ? '#b8ecff' : '#b197fc';
+        ctx.shadowBlur = 14;
+        const g = ctx.createLinearGradient(x, y, x, y + h);
+        if (freezeTimer > 0) {
+            g.addColorStop(0, '#e7f8ff'); g.addColorStop(0.5, '#74c0fc'); g.addColorStop(1, '#2878b5');
+        } else {
+            g.addColorStop(0, '#e5dbff'); g.addColorStop(0.5, '#b197fc'); g.addColorStop(1, '#7048b8');
+        }
+        ctx.fillStyle = g;
+        roundRect(ctx, x, y, w, h, h / 2);
+        ctx.fill();
+        ctx.restore();
+        ctx.fillStyle = 'rgba(255,255,255,0.4)';
+        roundRect(ctx, x + w / 2 - 12, y + h / 2 - 1.5, 24, 3, 1.5);
+        ctx.fill();
+        ctx.fillStyle = '#b197fc';
+        ctx.font = 'bold 10px "Segoe UI", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText('P2  ← / →', x + w / 2, y - 4);
+    }
+
+    function drawBalls() {
+        const skin = ballSkin();
+        for (const b of balls) {
+            // 拖尾（高连击更长更亮）
+            const boost = skin.hot ? 1.5 : 1;
+            for (let i = 0; i < b.trail.length; i++) {
+                const t = b.trail[i];
+                const a = (i / b.trail.length) * 0.35 * boost;
+                const [tr, tg, tb] = skin.trail;
+                ctx.fillStyle = `rgba(${tr},${tg},${tb},${Math.min(a, 0.55)})`;
+                ctx.beginPath();
+                ctx.arc(t.x, t.y, b.r * (0.3 + 0.6 * i / b.trail.length) * boost, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.save();
+            ctx.shadowColor = skin.glow;
+            ctx.shadowBlur = 16 + (skin.hot ? 8 : 0);
+            const g = ctx.createRadialGradient(b.x - b.r * 0.3, b.y - b.r * 0.35, b.r * 0.1, b.x, b.y, b.r);
+            g.addColorStop(0, skin.c0);
+            g.addColorStop(0.45, skin.c1);
+            g.addColorStop(1, skin.c2);
+            ctx.fillStyle = g;
+            ctx.beginPath();
+            ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.restore();
+        }
+    }
+
+    function drawPowerups() {
+        for (const p of powerups) {
+            const info = POWER_TYPES[p.type];
+            const bob = Math.sin(p.t * 6) * 2;
+            ctx.save();
+            ctx.translate(p.x, p.y + bob);
+            ctx.shadowColor = info.color;
+            ctx.shadowBlur = 12;
+            // 负面道具：深色底 + 警示描边
+            ctx.fillStyle = info.bad ? 'rgba(26,8,12,0.95)' : 'rgba(10,16,28,0.92)';
+            roundRect(ctx, -POWERUP_SIZE / 2, -POWERUP_SIZE / 2, POWERUP_SIZE, POWERUP_SIZE, 8);
+            ctx.fill();
+            ctx.shadowBlur = 0;
+            ctx.strokeStyle = info.color;
+            ctx.lineWidth = 2;
+            if (info.bad) ctx.setLineDash([5, 3]);
+            roundRect(ctx, -POWERUP_SIZE / 2, -POWERUP_SIZE / 2, POWERUP_SIZE, POWERUP_SIZE, 8);
+            ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = info.color;
+            ctx.font = `bold ${info.bad ? 17 : 15}px "Segoe UI", sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(info.label, 0, 1);
+            ctx.restore();
+        }
+    }
+
+    function drawRings() {
+        for (const r of rings) {
+            const a = clamp(r.life / r.maxLife, 0, 1);
+            ctx.strokeStyle = `rgba(255,140,60,${a * 0.8})`;
+            ctx.lineWidth = 3 + 4 * a;
+            ctx.beginPath();
+            ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
+            ctx.stroke();
+            ctx.strokeStyle = `rgba(255,217,61,${a * 0.5})`;
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.arc(r.x, r.y, r.r * 0.72, 0, Math.PI * 2);
+            ctx.stroke();
+        }
+    }
+
+    function drawParticles() {
+        for (const p of particles) {
+            ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+            ctx.fillStyle = p.color;
+            ctx.fillRect(p.x, p.y, p.size, p.size);
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    function drawFloatTexts() {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        for (const f of floatTexts) {
+            ctx.globalAlpha = clamp(f.life, 0, 1);
+            ctx.font = `bold ${f.size}px "Segoe UI", "PingFang SC", sans-serif`;
+            ctx.fillStyle = f.color;
+            ctx.fillText(f.text, f.x, f.y);
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    function drawOverlayText(title, sub, alpha = 1) {
+        ctx.fillStyle = `rgba(4,8,16,${0.62 * alpha})`;
+        ctx.fillRect(0, 0, W, H);
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = '#dbe7ff';
+        ctx.font = '800 42px "Segoe UI", "PingFang SC", sans-serif';
+        ctx.fillText(title, W / 2, H / 2 - 26);
+        if (sub) {
+            ctx.fillStyle = '#6c82a5';
+            ctx.font = '16px "Segoe UI", "PingFang SC", sans-serif';
+            ctx.fillText(sub, W / 2, H / 2 + 22);
+        }
+        ctx.globalAlpha = 1;
+    }
+
+    function drawBuffBar() {
+        const entries = Object.entries(buffs);
+        if (!entries.length) return;
+        ctx.save();
+        ctx.font = 'bold 12px "Segoe UI", "PingFang SC", sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'middle';
+        let x = 12;
+        const y = 10, h = 24;
+        for (const [id, lv] of entries) {
+            const def = BUFF_DEFS[id];
+            const label = `${def.icon}${def.name} Lv.${lv}`;
+            const w = ctx.measureText(label).width + 18;
+            ctx.fillStyle = 'rgba(13,21,36,0.85)';
+            roundRect(ctx, x, y, w, h, 12);
+            ctx.fill();
+            ctx.strokeStyle = def.color;
+            ctx.lineWidth = 1.5;
+            roundRect(ctx, x, y, w, h, 12);
+            ctx.stroke();
+            ctx.fillStyle = '#dbe7ff';
+            ctx.fillText(label, x + 9, y + h / 2 + 1);
+            x += w + 6;
+        }
+        ctx.restore();
+    }
+
+    function draw() {
+        ctx.save();
+        // 屏幕震动
+        if (shake > 0) {
+            ctx.translate(rand(-shake, shake), rand(-shake, shake));
+        }
+
+        // 背景
+        const bg = ctx.createRadialGradient(W / 2, H * 0.3, 60, W / 2, H * 0.5, 620);
+        bg.addColorStop(0, '#101c31');
+        bg.addColorStop(1, '#060a12');
+        ctx.fillStyle = bg;
+        ctx.fillRect(-20, -20, W + 40, H + 40);
+
+        // 网格底纹
+        ctx.strokeStyle = 'rgba(56,217,255,0.045)';
+        ctx.lineWidth = 1;
+        for (let gx = 0; gx <= W; gx += 50) {
+            ctx.beginPath(); ctx.moveTo(gx, 0); ctx.lineTo(gx, H); ctx.stroke();
+        }
+        for (let gy = 0; gy <= H; gy += 50) {
+            ctx.beginPath(); ctx.moveTo(0, gy); ctx.lineTo(W, gy); ctx.stroke();
+        }
+
+        // 死亡线
+        ctx.strokeStyle = 'rgba(255,107,129,0.18)';
+        ctx.setLineDash([8, 8]);
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, H - 4);
+        ctx.lineTo(W, H - 4);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        if (state !== 'menu') {
+            // 顶端：已持有强化条
+            drawBuffBar();
+            drawBricks();
+            drawPowerups();
+            drawParticles();
+            drawRings();
+            drawPaddle();
+            drawSecondPaddle();
+            drawBalls();
+            drawFloatTexts();
+
+            // 剩余砖块 & 状态指示
+            const alive = bricks.filter(b => b.alive).length;
+            ctx.font = '12px "Segoe UI", "PingFang SC", sans-serif';
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'bottom';
+            ctx.fillStyle = 'rgba(108,130,165,0.8)';
+            ctx.fillText(`剩余砖块 ${alive}`, 14, H - 12);
+            const status = [];
+            if (hasteTimer > 0) status.push({ text: `≫ 球加速 ${Math.ceil(hasteTimer)}s`, color: '#ff9f43' });
+            if (freezeTimer > 0) status.push({ text: `❄ 冻结 ${freezeTimer.toFixed(1)}s`, color: '#74c0fc' });
+            ctx.textAlign = 'right';
+            status.forEach((s, i) => {
+                ctx.fillStyle = s.color;
+                ctx.fillText(s.text, W - 14 - i * 130, H - 12);
+            });
+            // 连击表
+            if (combo >= COMBO_FIRE) {
+                ctx.fillStyle = combo >= COMBO_GOLD ? '#ffe98a' : '#ffd43b';
+                ctx.font = `bold ${14 + Math.min(combo, COMBO_GOLD)}px "Segoe UI", sans-serif`;
+                ctx.textBaseline = 'top';
+                ctx.fillText(`COMBO ×${combo}`, W - 14, 12);
+            }
+            // 秘籍开启标识
+            if (infiniteLives) {
+                ctx.fillStyle = '#ff9f43';
+                ctx.font = 'bold 12px "Segoe UI", sans-serif';
+                ctx.textAlign = 'right';
+                ctx.textBaseline = 'top';
+                ctx.fillText('♾ KOB MODE', W - 14, 34);
+            }
+            if (level === 3) {
+                ctx.fillStyle = '#ff9f43';
+                ctx.font = 'bold 12px "Segoe UI", "PingFang SC", sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                ctx.fillText('🧨 TNT 连锁挑战 · 周围砖块只掉负面技能', W / 2, 42);
+            }
+        }
+
+        // 连击满级：全屏金光氛围
+        if (combo >= COMBO_GOLD) {
+            const vg = ctx.createRadialGradient(W / 2, H / 2, H * 0.3, W / 2, H / 2, H * 0.85);
+            vg.addColorStop(0, 'rgba(255,217,61,0)');
+            vg.addColorStop(1, `rgba(255,217,61,${0.05 + 0.04 * Math.sin(performance.now() / 150)})`);
+            ctx.fillStyle = vg;
+            ctx.fillRect(0, 0, W, H);
+        }
+
+        // 状态覆盖层（主菜单由 HTML 开始面板呈现）
+        if (state === 'serving') {
+            ctx.textAlign = 'center';
+            ctx.fillStyle = 'rgba(255,255,255,0.28)';
+            ctx.font = '15px "Segoe UI", "PingFang SC", sans-serif';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText(twoPlayer ? `第 ${level} 关 · P1 A/D · P2 ←/-> · 空格发射`
+                                   : `第 ${level} 关 · 按空格 或 点击 发射`, W / 2, H - 16);
+        } else if (state === 'paused') {
+            drawOverlayText('⏸ 已暂停', '按 P 继续 · 按 Q 保存并返回主菜单');
+        } else if (state === 'levelclear') {
+            const a = clamp(levelClearTimer / 0.3, 0, 1);
+            drawOverlayText(`第 ${level} 关 通过!`, '✨ 即将选择强化卡', a);
+        }
+
+        // 掉命红闪
+        if (flashAlpha > 0) {
+            ctx.fillStyle = `rgba(255,60,80,${flashAlpha * 0.32})`;
+            ctx.fillRect(-20, -20, W + 40, H + 40);
+        }
+
+        ctx.restore();
+    }
+
+    // ================= 游戏循环 =================
+    function loop(ts) {
+        const dt = Math.min((ts - lastTime) / 1000, 0.033);
+        lastTime = ts;
+        if (state !== 'paused' && state !== 'gameover' && !devOpen) update(dt);
+        draw();
+        animId = requestAnimationFrame(loop);
+    }
+
+    // ================= 输入 =================
+    function primaryAction() {
+        ensureAudio();
+        if (state === 'serving') {
+            launchBalls();
+            state = 'playing';
+            stage.classList.add('playing');
+        } else if (state === 'paused') {
+            state = balls.some(b => b.vx || b.vy) ? 'playing' : 'serving';
+            lastTime = performance.now();
+        }
+    }
+
+    function pointerToCanvasX(clientX) {
+        const rect = canvas.getBoundingClientRect();
+        return (clientX - rect.left) * (canvas.width / rect.width);
+    }
+    function movePaddleTo(clientX) {
+        if (state !== 'playing' && state !== 'serving' && state !== 'menu') return;
+        if (freezeTimer > 0) return;
+        paddle.x = clamp(pointerToCanvasX(clientX) - paddle.w / 2, 0, W - paddle.w);
+    }
+
+    window.addEventListener('keydown', (e) => {
+        const k = e.key;
+        // 输入框内不触发游戏快捷键与秘籍
+        if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+        // KOB 秘籍序列（再输入一次 KOB 也可关闭）
+        if (/^[a-zA-Z]$/.test(k)) {
+            devBuffer = (devBuffer + k.toLowerCase()).slice(-8);
+            if (devBuffer.endsWith('kob')) {
+                devBuffer = '';
+                toggleDevPanel();
+                return;
+            }
+        }
+        // 秘籍弹窗打开时：仅 Esc 可关闭，其余按键屏蔽
+        if (devOpen) {
+            e.preventDefault();
+            if (k === 'Escape') closeDevPanel();
+            return;
+        }
+        if (k === 'a' || k === 'A') { keys.p1l = true; e.preventDefault(); }
+        else if (k === 'd' || k === 'D') { keys.p1r = true; e.preventDefault(); }
+        else if (k === 'ArrowLeft') { keys.p2l = true; e.preventDefault(); }
+        else if (k === 'ArrowRight') { keys.p2r = true; e.preventDefault(); }
+        else if (k === ' ' || k === 'Spacebar') { e.preventDefault(); primaryAction(); }
+        else if (k === 'p' || k === 'P' || k === 'Escape') {
+            if (state === 'playing' || state === 'serving') { state = 'paused'; stage.classList.remove('playing'); }
+            else if (state === 'paused') primaryAction();
+        }
+        else if (k === 'q' || k === 'Q') {
+            if (state === 'paused' || state === 'serving' || state === 'playing') {
+                // 返回主菜单；进度保留在最近一次三关检查点
+                currentSlot = 0;
+                showStartPanel();
+            }
+        }
+        else if (k === 'm' || k === 'M') toggleMute();
+        else if (k === 'f' || k === 'F') toggleFullscreen();
+        else if (k === 'r' || k === 'R') { if (state === 'gameover') restart(); }
+    });
+    window.addEventListener('keyup', (e) => {
+        const k = e.key;
+        if (k === 'a' || k === 'A') keys.p1l = false;
+        else if (k === 'd' || k === 'D') keys.p1r = false;
+        else if (k === 'ArrowLeft') keys.p2l = false;
+        else if (k === 'ArrowRight') keys.p2r = false;
+    });
+    window.addEventListener('blur', () => {
+        keys.p1l = keys.p1r = keys.p2l = keys.p2r = false;
+        if (state === 'playing') { state = 'paused'; stage.classList.remove('playing'); }
+    });
+
+    canvas.addEventListener('mousemove', (e) => movePaddleTo(e.clientX));
+    canvas.addEventListener('click', () => primaryAction());
+    canvas.addEventListener('touchstart', (e) => {
+        e.preventDefault();
+        if (state === 'playing') return;
+        primaryAction();
+        if (e.touches[0]) movePaddleTo(e.touches[0].clientX);
+    }, { passive: false });
+    canvas.addEventListener('touchmove', (e) => {
+        e.preventDefault();
+        if (e.touches[0]) movePaddleTo(e.touches[0].clientX);
+    }, { passive: false });
+
+    function toggleMute() {
+        muted = !muted;
+        btnMute.textContent = muted ? '🔇' : '🔊';
+    }
+    async function toggleFullscreen() {
+        try {
+            if (!document.fullscreenElement) await gameWrapper.requestFullscreen();
+            else await document.exitFullscreen();
+        } catch (_) {}
+    }
+    btnMute.addEventListener('click', (e) => { e.stopPropagation(); toggleMute(); });
+    btnFullscreen.addEventListener('click', (e) => { e.stopPropagation(); toggleFullscreen(); });
+    document.addEventListener('fullscreenchange', () => {
+        btnFullscreen.textContent = document.fullscreenElement ? '⛶' : '⛶';
+        btnFullscreen.title = document.fullscreenElement ? '退出全屏 (F)' : '全屏 (F)';
+    });
+    btnRestart.addEventListener('click', restart);
+    document.getElementById('btn-menu').addEventListener('click', () => {
+        currentSlot = 0;
+        showStartPanel();
+    });
+    btnNew.addEventListener('click', () => { ensureAudio(); showSlotPicker('new'); });
+    btnLoad.addEventListener('click', () => { ensureAudio(); showSlotPicker('load'); });
+    btnBack.addEventListener('click', () => {
+        startButtons.classList.remove('hidden');
+        slotList.classList.add('hidden');
+        btnBack.classList.add('hidden');
+    });
+    function selectMenuMode(isTwoPlayer) {
+        menuTwoPlayer = isTwoPlayer;
+        mode1p.classList.toggle('active', !isTwoPlayer);
+        mode2p.classList.toggle('active', isTwoPlayer);
+    }
+    mode1p.addEventListener('click', () => selectMenuMode(false));
+    mode2p.addEventListener('click', () => selectMenuMode(true));
+
+    // 开发者秘籍事件
+    devClose.addEventListener('click', closeDevPanel);
+    devPanel.addEventListener('click', (e) => {
+        if (e.target === devPanel) closeDevPanel();     // 点击遮罩关闭
+    });
+    devLevelJump.addEventListener('click', () => devJumpLevel(parseInt(devLevelInput.value, 10)));
+    devLevelInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') devJumpLevel(parseInt(devLevelInput.value, 10));
+    });
+    devHalf.addEventListener('click', devKillHalfBricks);
+    devInfinite.addEventListener('change', () => {
+        infiniteLives = devInfinite.checked;
+        if (infiniteLives) {
+            lives = MAX_LIVES;
+            updateLivesUI();
+        }
+    });
+    devReset.addEventListener('click', () => {
+        infiniteLives = false;
+        devInfinite.checked = false;
+        addFloatText(W / 2, H / 2, '秘籍效果已关闭', '#ff8fa3', 16);
+    });
+
+    // ================= 开发者秘籍（输入 KOB 呼出） =================
+    function openDevPanel() {
+        devOpen = true;
+        devLevelInput.value = level;
+        devInfinite.checked = infiniteLives;
+        renderDevBuffs();
+        devPanel.classList.add('active');
+        SFX.power();
+    }
+    function closeDevPanel() {
+        devOpen = false;
+        devPanel.classList.remove('active');
+    }
+    function toggleDevPanel() {
+        devOpen ? closeDevPanel() : openDevPanel();
+    }
+
+    function renderDevBuffs() {
+        devBuffsEl.innerHTML = '';
+        for (const [id, def] of Object.entries(BUFF_DEFS)) {
+            const row = document.createElement('div');
+            row.className = 'dev-buff-row';
+            const name = document.createElement('span');
+            name.className = 'dev-buff-name';
+            name.textContent = def.icon + ' ' + def.name;
+            name.title = def.desc(1);
+            const stepper = document.createElement('span');
+            stepper.className = 'dev-stepper';
+            const minus = document.createElement('button');
+            minus.textContent = '−';
+            const lvEl = document.createElement('span');
+            lvEl.className = 'dev-lv';
+            lvEl.textContent = 'Lv.' + buffLv(id);
+            const plus = document.createElement('button');
+            plus.textContent = '+';
+            minus.addEventListener('click', () => devAdjustBuff(id, -1));
+            plus.addEventListener('click', () => devAdjustBuff(id, 1));
+            stepper.append(minus, lvEl, plus);
+            row.append(name, stepper);
+            devBuffsEl.appendChild(row);
+        }
+    }
+
+    function devAdjustBuff(id, delta) {
+        const cur = buffLv(id);
+        const next = clamp(cur + delta, 0, MAX_BUFF_LV);
+        if (next === cur) return;
+        if (next === 0) delete buffs[id]; else buffs[id] = next;
+        // 即时生效
+        if (id === 'wide') paddle.targetW = currentTargetW();
+        if (id === 'ball') for (const b of balls) b.r = ballRadiusNow();
+        renderDevBuffs();
+    }
+
+    function devJumpLevel(n) {
+        n = clamp(Math.floor(n) || 1, 1, 999);
+        if (state === 'menu' || state === 'gameover') {
+            startGame(currentSlot || 1, null);           // 秘籍可直接开一局用于测试
+        }
+        level = n;
+        updateLevelUI();
+        bricks = createBricks(level);
+        powerups = []; particles = []; floatTexts = []; rings = [];
+        expandTimer = shrinkTimer = freezeTimer = 0;
+        edgeBoost = false;
+        paddle.targetW = basePaddleWidth();
+        resetBallsToPaddle();
+        state = 'serving';
+        stage.classList.remove('playing');
+        closeDevPanel();
+    }
+
+    function devKillHalfBricks() {
+        const alive = bricks.filter(b => b.alive);
+        const killCount = Math.ceil(alive.length / 2);
+        // 部分洗牌：前 killCount 个位置与随机位置交换后处决
+        for (let i = 0; i < killCount; i++) {
+            const j = randInt(i, alive.length - 1);
+            [alive[i], alive[j]] = [alive[j], alive[i]];
+            alive[i].alive = false;                     // 静默消失：不计分、不掉道具、TNT 不炸
+            spawnBrickParticles(alive[i]);
+        }
+        shake = Math.max(shake, 10);
+        SFX.boom();
+    }
+
+    // ================= 生命周期 =================
+    function startGame(slot, saveData) {
+        currentSlot = slot;
+        twoPlayer = saveData && typeof saveData.twoPlayer === 'boolean' ? saveData.twoPlayer : menuTwoPlayer;
+        if (saveData) {
+            level = clamp(saveData.level || 1, 1, 9999);
+            score = saveData.score || 0;
+            lives = clamp(saveData.lives || MAX_LIVES, 1, LIVES_CAP);
+        } else {
+            level = 1;
+            score = 0;
+            lives = MAX_LIVES;
+        }
+        buffs = {};
+        if (saveData && saveData.buffs) {
+            for (const [k, v] of Object.entries(saveData.buffs)) {
+                if (BUFF_DEFS[k] && typeof v === 'number' && v > 0) buffs[k] = Math.min(v, MAX_BUFF_LV);
+            }
+        }
+        combo = 0;
+        edgeBoost = false;
+        expandTimer = shrinkTimer = freezeTimer = 0;
+        paddleFlash = 0;
+        paddle.w = paddle.targetW = basePaddleWidth();
+        paddle.x = (W - paddle.w) / 2;
+        paddle2.w = basePaddleWidth();
+        paddle2.x = (W - paddle2.w) / 2;
+        bricks = createBricks(level);
+        powerups = []; particles = []; floatTexts = [];
+        rings = [];
+        resetBallsToPaddle();
+        hideStartPanel();
+        draftPanel.classList.remove('active');
+        modalOverlay.classList.remove('active');
+        modalBox.classList.remove('record');
+        updateScoreUI(); updateLivesUI(); updateLevelUI();
+        state = 'serving';
+        lastTime = performance.now();
+        saveGame();                    // 开局即写入存档位
+    }
+    function restart() {
+        const slot = currentSlot || 1;
+        const checkpoint = readSlot(slot);
+        startGame(slot, checkpoint);             // 死亡后从最近的三关检查点继续
+        window.focus();
+    }
+
+    function boot() {
+        updateScoreUI(); updateLivesUI(); updateLevelUI();
+        menuHighScoreEl.textContent = highScore;
+        lastTime = performance.now();
+        animId = requestAnimationFrame(loop);
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot);
+    else boot();
+})();
+</script>
+</body>
+</html>

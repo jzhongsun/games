@@ -419,6 +419,57 @@
             color: var(--accent);
             background: rgba(56,217,255,0.08);
         }
+        .music-picker {
+            margin-bottom: 12px;
+            padding: 10px;
+            border: 1px solid var(--panel-edge);
+            border-radius: 10px;
+            background: rgba(7,11,20,0.55);
+        }
+        .music-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 11px;
+            color: var(--text-dim);
+            letter-spacing: 1px;
+        }
+        .music-style-tabs { display: flex; gap: 5px; }
+        .music-tab {
+            border: 1px solid #273a5e;
+            background: #111b30;
+            color: var(--text-dim);
+            border-radius: 20px;
+            padding: 3px 8px;
+            font: 700 10px inherit;
+            cursor: pointer;
+        }
+        .music-tab.active { color: var(--gold); border-color: var(--gold); background: rgba(255,217,61,0.08); }
+        .music-tracks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+        .music-track {
+            min-width: 0;
+            border: 1px solid #1f3151;
+            background: #101a2e;
+            color: var(--text-dim);
+            border-radius: 8px;
+            padding: 7px 6px;
+            font: 600 11px inherit;
+            cursor: pointer;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            transition: 0.15s;
+        }
+        .music-track:hover { border-color: #597cb8; color: var(--text); }
+        .music-track.active {
+            border-color: var(--accent);
+            color: var(--accent);
+            box-shadow: inset 0 0 14px rgba(56,217,255,0.08);
+        }
+        .music-volume { display: flex; align-items: center; gap: 7px; margin-top: 8px; color: var(--text-dim); font-size: 10px; }
+        .music-volume input { flex: 1; height: 3px; accent-color: var(--accent); }
+        .music-credit { margin-top: 7px; color: #4f6487; font-size: 9px; line-height: 1.4; }
         #btn-fullscreen {
             background: var(--panel);
             border: 1px solid var(--panel-edge);
@@ -431,19 +482,29 @@
             transition: 0.2s;
         }
         #btn-fullscreen:hover { color: var(--text); border-color: #2e4368; }
-        #game-wrapper:fullscreen {
+        /* 只让游戏舞台进入全屏，不把网页外框和 HUD 带入全屏 */
+        #game-stage:fullscreen {
+            width: 100vw;
+            height: 100vh;
             display: flex;
-            flex-direction: column;
             justify-content: center;
             align-items: center;
+            border: none;
             border-radius: 0;
-            padding: 16px;
-            background: #070b14;
-            overflow: auto;
+            background: #03060c;
+            overflow: hidden;
         }
-        #game-wrapper:fullscreen #gameCanvas {
-            width: min(96vw, calc(86vh * 4 / 3));
-            height: auto;
+        #game-stage:fullscreen #gameCanvas {
+            width: min(100vw, calc(100vh * 4 / 3));
+            height: min(100vh, calc(100vw * 3 / 4));
+            aspect-ratio: 4 / 3;
+            object-fit: contain;
+        }
+        #game-stage:fullscreen #start-panel,
+        #game-stage:fullscreen #draft-panel {
+            width: min(100vw, calc(100vh * 4 / 3));
+            height: min(100vh, calc(100vw * 3 / 4));
+            inset: auto;
         }
 
         /* ===== 底部快捷键提示 ===== */
@@ -575,6 +636,21 @@
                 <div class="mode-select" id="modeSelect">
                     <button class="mode-btn active" id="mode-1p" type="button">👤 单人</button>
                     <button class="mode-btn" id="mode-2p" type="button">⚔ 双人对战</button>
+                </div>
+                <div class="music-picker">
+                    <div class="music-head">
+                        <span>🎵 BGM 风格</span>
+                        <span class="music-style-tabs">
+                            <button class="music-tab active" data-style="slot">🎰老虎机</button>
+                            <button class="music-tab" data-style="8bit">👾8-BIT</button>
+                        </span>
+                    </div>
+                    <div class="music-tracks" id="music-tracks"></div>
+                    <label class="music-volume">音量
+                        <input id="music-volume" type="range" min="0" max="100" value="32" />
+                        <span id="music-volume-label">32%</span>
+                    </label>
+                    <div class="music-credit" id="music-credit">音乐：OpenGameArt CC0 · 点击曲目试听</div>
                 </div>
                 <div class="start-buttons" id="startButtons">
                     <button class="btn-primary" id="btn-new">🆕 新游戏</button>
@@ -781,7 +857,10 @@
     const btnFullscreen = document.getElementById('btn-fullscreen');
     const mode1p = document.getElementById('mode-1p');
     const mode2p = document.getElementById('mode-2p');
-    const gameWrapper = document.getElementById('game-wrapper');
+    const musicTracksEl = document.getElementById('music-tracks');
+    const musicVolumeEl = document.getElementById('music-volume');
+    const musicVolumeLabel = document.getElementById('music-volume-label');
+    const musicCreditEl = document.getElementById('music-credit');
 
     // ================= 几何 =================
     const brickAreaWidth = W * BRICK_AREA_RATIO;
@@ -828,7 +907,64 @@
     // 旧合作模式结构保留为惰性兼容，不再参与对战逻辑
     const paddle2 = { x: 0, y: 26, w: PADDLE_WIDTH_BASE, h: PADDLE_HEIGHT };
 
-    // ================= 音效 (Web Audio) =================
+    // ================= BGM 与音效 =================
+    const BGM_TRACKS = {
+        slot: [
+            { id: 'slot-bonus', name: '🎰 Bonus Fever', src: 'assets/bgm/slot-bonus.mp3', credit: 'CC0 Retro Music · OpenGameArt' },
+            { id: 'slot-summer', name: '🪙 Lucky Summer', src: 'assets/bgm/slot-summer.ogg', credit: 'Summer Park 8-bit Tune · CC0' },
+        ],
+        '8bit': [
+            { id: '8bit-focus', name: '👾 Pixel Focus', src: 'assets/bgm/8bit-focus.mp3', credit: '8 Bit Concentration Loop · CC0' },
+            { id: '8bit-amusement', name: '🕹 Arcade Rush', src: 'assets/bgm/8bit-amusement.ogg', credit: 'Amusement Park Stage · CC0' },
+        ],
+    };
+    const bgmAudio = new Audio();
+    bgmAudio.loop = true;
+    bgmAudio.preload = 'auto';
+    let bgmStyle = localStorage.getItem('brickKingBgmStyle') || 'slot';
+    let bgmTrackId = localStorage.getItem('brickKingBgmTrack') || 'slot-bonus';
+    let bgmVolume = Math.max(0, Math.min(100, parseInt(localStorage.getItem('brickKingBgmVolume') || '32', 10)));
+
+    function allBgmTracks() { return Object.values(BGM_TRACKS).flat(); }
+    function selectedBgm() { return allBgmTracks().find(t => t.id === bgmTrackId) || BGM_TRACKS.slot[0]; }
+    function playSelectedBgm() {
+        if (muted || bgmVolume <= 0) return;
+        const track = selectedBgm();
+        if (!bgmAudio.src.endsWith(track.src)) bgmAudio.src = track.src;
+        bgmAudio.volume = bgmVolume / 100;
+        bgmAudio.play().catch(() => {});
+    }
+    function selectBgm(id, preview = true) {
+        const track = allBgmTracks().find(t => t.id === id);
+        if (!track) return;
+        bgmTrackId = id;
+        bgmStyle = Object.keys(BGM_TRACKS).find(style => BGM_TRACKS[style].some(t => t.id === id)) || 'slot';
+        localStorage.setItem('brickKingBgmTrack', bgmTrackId);
+        localStorage.setItem('brickKingBgmStyle', bgmStyle);
+        bgmAudio.pause();
+        bgmAudio.src = track.src;
+        bgmAudio.currentTime = 0;
+        bgmAudio.volume = bgmVolume / 100;
+        renderMusicPicker();
+        if (preview) bgmAudio.play().catch(() => {});
+    }
+    function renderMusicPicker() {
+        document.querySelectorAll('.music-tab').forEach(tab => tab.classList.toggle('active', tab.dataset.style === bgmStyle));
+        musicTracksEl.innerHTML = '';
+        for (const track of BGM_TRACKS[bgmStyle]) {
+            const btn = document.createElement('button');
+            btn.className = 'music-track' + (track.id === bgmTrackId ? ' active' : '');
+            btn.textContent = track.name;
+            btn.title = track.credit;
+            btn.addEventListener('click', () => selectBgm(track.id));
+            musicTracksEl.appendChild(btn);
+        }
+        const track = selectedBgm();
+        musicCreditEl.textContent = `当前：${track.name} · ${track.credit}`;
+        musicVolumeEl.value = bgmVolume;
+        musicVolumeLabel.textContent = bgmVolume + '%';
+    }
+
     let audioCtx = null;
     function ensureAudio() {
         try {
@@ -852,18 +988,45 @@
             osc.start(t0); osc.stop(t0 + duration);
         } catch (_) {}
     }
+    function noiseBurst(duration = 0.1, volume = 0.08, cutoff = 1200, delay = 0) {
+        if (muted) return;
+        try {
+            ensureAudio();
+            const length = Math.max(1, audioCtx.sampleRate * duration);
+            const buffer = audioCtx.createBuffer(1, length, audioCtx.sampleRate);
+            const data = buffer.getChannelData(0);
+            for (let i = 0; i < length; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / length);
+            const src = audioCtx.createBufferSource();
+            const filter = audioCtx.createBiquadFilter();
+            const gain = audioCtx.createGain();
+            const t0 = audioCtx.currentTime + delay;
+            src.buffer = buffer;
+            filter.type = 'lowpass'; filter.frequency.value = cutoff;
+            gain.gain.setValueAtTime(volume, t0);
+            gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
+            src.connect(filter); filter.connect(gain); gain.connect(audioCtx.destination);
+            src.start(t0);
+        } catch (_) {}
+    }
+    function arpeggio(notes, step = 0.065, volume = 0.075, type = 'square') {
+        notes.forEach((freq, i) => tone(freq, step * 1.8, type, volume, i * step));
+    }
     const SFX = {
-        launch()  { tone(660, 0.1, 'sine', 0.12); tone(990, 0.12, 'sine', 0.10, 0.07); },
-        brick(hp, cmb) { tone(440 + Math.min(cmb, COMBO_GOLD) * 55 + hp * 30, 0.07, 'square', 0.08); },
-        wall()    { tone(300, 0.05, 'sine', 0.06); },
-        paddle()  { tone(430, 0.06, 'sine', 0.09); },
-        edge()    { tone(1180, 0.08, 'sine', 0.12); tone(1560, 0.10, 'sine', 0.10, 0.06); },
-        bad()     { tone(160, 0.22, 'sawtooth', 0.13); tone(120, 0.3, 'sawtooth', 0.10, 0.1); },
-        power()   { tone(880, 0.09, 'sine', 0.11); tone(1320, 0.12, 'sine', 0.09, 0.08); },
-        boom()    { tone(90, 0.35, 'sawtooth', 0.20); tone(60, 0.5, 'sawtooth', 0.16, 0.05); tone(240, 0.08, 'square', 0.10); },
-        lose()    { tone(220, 0.3, 'sawtooth', 0.13); tone(140, 0.4, 'sawtooth', 0.10, 0.12); },
-        over()    { tone(400, 0.2, 'square', 0.10); tone(300, 0.2, 'square', 0.10, 0.16); tone(180, 0.5, 'square', 0.10, 0.32); },
-        clear()   { [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.18, 'sine', 0.11, i * 0.11)); },
+        launch()  { arpeggio([523, 659, 784, 1047], 0.045, 0.055, 'square'); tone(130, 0.18, 'sine', 0.05); },
+        brick(hp, cmb) {
+            const f = 440 + Math.min(cmb, COMBO_GOLD) * 55 + hp * 30;
+            tone(f, 0.065, 'square', 0.07); tone(f / 2, 0.09, 'triangle', 0.04); noiseBurst(0.035, 0.025, 1800);
+        },
+        wall()    { tone(280, 0.045, 'triangle', 0.05); noiseBurst(0.025, 0.018, 1000); },
+        paddle()  { tone(430, 0.065, 'sine', 0.08); tone(215, 0.09, 'triangle', 0.04); },
+        edge()    { arpeggio([988, 1319, 1568], 0.045, 0.07, 'square'); },
+        bad()     { tone(160, 0.22, 'sawtooth', 0.11); tone(120, 0.3, 'sawtooth', 0.08, 0.1); noiseBurst(0.12, 0.06, 500); },
+        power()   { arpeggio([659, 880, 1109, 1319], 0.055, 0.07, 'sine'); },
+        boom()    { tone(90, 0.38, 'sawtooth', 0.16); tone(55, 0.55, 'sine', 0.15, 0.03); noiseBurst(0.28, 0.15, 900); },
+        lose()    { arpeggio([330, 277, 220, 165], 0.09, 0.08, 'sawtooth'); },
+        over()    { arpeggio([392, 330, 262, 196, 131], 0.11, 0.075, 'square'); },
+        clear()   { arpeggio([523, 659, 784, 1047, 1319, 1568], 0.075, 0.085, 'square'); tone(65, 0.65, 'sine', 0.08); },
+        jackpot() { arpeggio([784, 988, 1175, 1568, 1976, 2349], 0.05, 0.08, 'square'); },
     };
 
     // ================= 工具 =================
@@ -995,6 +1158,7 @@
     function applyPowerup(type) {
         const info = POWER_TYPES[type];
         addFloatText(paddle.x + paddle.w / 2, paddle.y - 24, info.name, info.color, 16);
+        if (!info.bad) spawnStarBurst(paddle.x + paddle.w / 2, paddle.y, 4);
         if (info.bad) {
             SFX.bad();
             shake = Math.max(shake, 8);
@@ -1036,15 +1200,43 @@
 
     // ================= 特效 =================
     function spawnBrickParticles(brick) {
-        const color = TIER_COLORS[clamp(brick.maxHp, 1, 4)];
-        for (let i = 0; i < 12; i++) {
+        const color = brick.tnt ? { top: '#ff8c42' } : TIER_COLORS[clamp(brick.maxHp, 1, 4)];
+        const count = combo >= COMBO_FIRE ? 20 : 12;
+        for (let i = 0; i < count; i++) {
             particles.push({
+                kind: i % 5 === 0 ? 'spark' : 'square',
                 x: brick.x + rand(0, brick.w),
                 y: brick.y + rand(0, brick.h),
-                vx: rand(-160, 160), vy: rand(-220, 40),
-                size: rand(2, 5),
+                vx: rand(-190, 190), vy: rand(-260, 50),
+                size: rand(2, combo >= COMBO_FIRE ? 7 : 5),
                 color: Math.random() < 0.7 ? color.top : '#ffffff',
-                life: rand(0.4, 0.8), maxLife: 0.8,
+                spin: rand(-8, 8), angle: rand(0, Math.PI * 2),
+                life: rand(0.4, 0.9), maxLife: 0.9,
+            });
+        }
+        if (combo >= COMBO_HOT) spawnStarBurst(brick.x + brick.w / 2, brick.y + brick.h / 2, combo);
+    }
+    function spawnStarBurst(x, y, power = 1) {
+        const colors = ['#ffffff', '#ffd43b', '#38d9ff', '#f783ac', '#7cf7b0'];
+        const count = Math.min(28, 8 + power * 2);
+        for (let i = 0; i < count; i++) {
+            const a = rand(0, Math.PI * 2), sp = rand(80, 260 + power * 12);
+            particles.push({
+                kind: 'star', x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+                size: rand(3, 7), color: colors[randInt(0, colors.length - 1)],
+                angle: a, spin: rand(-12, 12), life: rand(0.35, 0.75), maxLife: 0.75,
+            });
+        }
+    }
+    function spawnConfetti(count = 90) {
+        const colors = ['#ffd43b', '#38d9ff', '#f783ac', '#7cf7b0', '#b197fc', '#ff8c42'];
+        for (let i = 0; i < count; i++) {
+            particles.push({
+                kind: 'confetti', x: rand(0, W), y: rand(-80, -10),
+                vx: rand(-70, 70), vy: rand(80, 250), size: rand(4, 9),
+                color: colors[randInt(0, colors.length - 1)],
+                angle: rand(0, Math.PI * 2), spin: rand(-10, 10),
+                life: rand(1.5, 3), maxLife: 3,
             });
         }
     }
@@ -1382,11 +1574,13 @@
             const a = rand(0, Math.PI * 2);
             const sp = rand(80, 460);
             particles.push({
+                kind: i % 4 === 0 ? 'star' : i % 3 === 0 ? 'spark' : 'square',
                 x, y,
                 vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
-                size: rand(3, 7),
+                size: rand(3, 8),
                 color: ['#ff6b35', '#ffd93d', '#ff5566', '#ffffff'][randInt(0, 3)],
-                life: rand(0.35, 0.85), maxLife: 0.85,
+                angle: a, spin: rand(-14, 14),
+                life: rand(0.35, 0.95), maxLife: 0.95,
             });
         }
     }
@@ -1777,6 +1971,9 @@
                 const bonus = addScore(300 + (level - 1) * 50);
                 addFloatText(W / 2, H / 2 - 40, '通关奖励 +' + bonus, '#ffd43b', 20);
                 SFX.clear();
+                SFX.jackpot();
+                spawnConfetti(110);
+                spawnStarBurst(W / 2, H / 2, 10);
                 state = 'levelclear';
                 levelClearTimer = 1.6;
                 balls = [];
@@ -1800,7 +1997,8 @@
             p.life -= dt;
             if (p.life <= 0) { particles.splice(i, 1); continue; }
             p.x += p.vx * dt; p.y += p.vy * dt;
-            p.vy += 600 * dt;
+            p.vy += (p.kind === 'confetti' ? 70 : 600) * dt;
+            p.angle = (p.angle || 0) + (p.spin || 0) * dt;
         }
         // 浮动文字
         for (let i = floatTexts.length - 1; i >= 0; i--) {
@@ -2089,12 +2287,37 @@
     }
 
     function drawParticles() {
+        ctx.save();
+        ctx.globalCompositeOperation = 'lighter';
         for (const p of particles) {
             ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
             ctx.fillStyle = p.color;
-            ctx.fillRect(p.x, p.y, p.size, p.size);
+            ctx.strokeStyle = p.color;
+            ctx.save();
+            ctx.translate(p.x, p.y);
+            ctx.rotate(p.angle || 0);
+            if (p.kind === 'star') {
+                ctx.beginPath();
+                for (let i = 0; i < 8; i++) {
+                    const a = i * Math.PI / 4;
+                    const r = i % 2 === 0 ? p.size : p.size * 0.28;
+                    const x = Math.cos(a) * r, y = Math.sin(a) * r;
+                    i ? ctx.lineTo(x, y) : ctx.moveTo(x, y);
+                }
+                ctx.closePath(); ctx.fill();
+            } else if (p.kind === 'spark') {
+                ctx.lineWidth = Math.max(1, p.size * 0.35);
+                ctx.beginPath(); ctx.moveTo(-p.size * 2.2, 0); ctx.lineTo(p.size * 2.2, 0); ctx.stroke();
+            } else if (p.kind === 'confetti') {
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.fillRect(-p.size / 2, -p.size * 0.25, p.size, p.size * 0.5);
+                ctx.globalCompositeOperation = 'lighter';
+            } else {
+                ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
+            }
+            ctx.restore();
         }
-        ctx.globalAlpha = 1;
+        ctx.restore();
     }
 
     function drawFloatTexts() {
@@ -2190,6 +2413,26 @@
             ctx.fillStyle = '#8ea3c6'; ctx.font = '15px "Segoe UI", "PingFang SC", sans-serif';
             ctx.fillText('空格发球 · 先清砖或耗尽对手生命者获胜', W / 2, H / 2 + 22);
         }
+        ctx.restore();
+    }
+
+    function drawFullscreenHud() {
+        if (document.fullscreenElement !== stage || state === 'menu' || twoPlayer) return;
+        ctx.save();
+        ctx.fillStyle = 'rgba(7,11,20,0.78)';
+        roundRect(ctx, W / 2 - 165, H - 40, 330, 28, 14);
+        ctx.fill();
+        ctx.font = 'bold 12px "Segoe UI", "PingFang SC", sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#38d9ff';
+        ctx.fillText(`关卡 ${level}`, W / 2 - 115, H - 26);
+        ctx.fillStyle = '#dbe7ff';
+        ctx.fillText(`分数 ${score}`, W / 2 - 30, H - 26);
+        ctx.fillStyle = '#ff6b81';
+        ctx.fillText(`生命 ${'♥'.repeat(lives)}${'♡'.repeat(MAX_LIVES - lives)}`, W / 2 + 65, H - 26);
+        ctx.fillStyle = '#6c82a5';
+        ctx.fillText('F / Esc 退出', W / 2 + 135, H - 26);
         ctx.restore();
     }
 
@@ -2335,6 +2578,8 @@
             drawOverlayText(`第 ${level} 关 通过!`, '✨ 即将选择强化卡', a);
         }
 
+        drawFullscreenHud();
+
         // 掉命红闪
         if (flashAlpha > 0) {
             ctx.fillStyle = `rgba(255,60,80,${flashAlpha * 0.32})`;
@@ -2453,10 +2698,12 @@
     function toggleMute() {
         muted = !muted;
         btnMute.textContent = muted ? '🔇' : '🔊';
+        if (muted) bgmAudio.pause();
+        else playSelectedBgm();
     }
     async function toggleFullscreen() {
         try {
-            if (!document.fullscreenElement) await gameWrapper.requestFullscreen();
+            if (!document.fullscreenElement) await stage.requestFullscreen();
             else await document.exitFullscreen();
         } catch (_) {}
     }
@@ -2485,6 +2732,20 @@
     }
     mode1p.addEventListener('click', () => selectMenuMode(false));
     mode2p.addEventListener('click', () => selectMenuMode(true));
+    document.querySelectorAll('.music-tab').forEach(tab => tab.addEventListener('click', () => {
+        bgmStyle = tab.dataset.style;
+        const currentInStyle = BGM_TRACKS[bgmStyle].some(t => t.id === bgmTrackId);
+        if (!currentInStyle) bgmTrackId = BGM_TRACKS[bgmStyle][0].id;
+        localStorage.setItem('brickKingBgmStyle', bgmStyle);
+        renderMusicPicker();
+    }));
+    musicVolumeEl.addEventListener('input', () => {
+        bgmVolume = parseInt(musicVolumeEl.value, 10);
+        bgmAudio.volume = bgmVolume / 100;
+        musicVolumeLabel.textContent = bgmVolume + '%';
+        localStorage.setItem('brickKingBgmVolume', String(bgmVolume));
+        if (bgmVolume > 0 && bgmAudio.paused && !muted) playSelectedBgm();
+    });
 
     // 开发者秘籍事件
     devClose.addEventListener('click', closeDevPanel);
@@ -2597,6 +2858,7 @@
 
     // ================= 生命周期 =================
     function startGame(slot, saveData) {
+        playSelectedBgm();
         currentSlot = slot;
         twoPlayer = saveData && typeof saveData.twoPlayer === 'boolean' ? saveData.twoPlayer : menuTwoPlayer;
         if (saveData) {
@@ -2650,6 +2912,7 @@
     function boot() {
         updateScoreUI(); updateLivesUI(); updateLevelUI();
         menuHighScoreEl.textContent = highScore;
+        renderMusicPicker();
         lastTime = performance.now();
         animId = requestAnimationFrame(loop);
     }

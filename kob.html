@@ -916,6 +916,18 @@
     const ROW_TINT = ['rgba(255,255,255,0.10)', 'rgba(255,255,255,0.05)', 'rgba(0,0,0,0.05)',
                       'rgba(0,0,0,0.10)', 'rgba(0,0,0,0.14)', 'rgba(0,0,0,0.18)'];
 
+    // 砖块类型：普通 / 红(3血) / 混凝土(不可碎) / 冰块(给球冰冻) / 毒砖(给球中毒)
+    const BRICK_TYPE = { normal: 'normal', red: 'red', concrete: 'concrete', ice: 'ice', poison: 'poison' };
+    // 各类型按关卡解锁与权重（随关卡升高加重特殊砖比例）
+    const BRICK_TYPE_RULES = [
+        { lv: 1, normal: 100, red: 0,  concrete: 0, ice: 0, poison: 0 },
+        { lv: 2, normal: 82,  red: 10, concrete: 0, ice: 5, poison: 3 },
+        { lv: 3, normal: 68,  red: 16, concrete: 0, ice: 8, poison: 8 },
+        { lv: 5, normal: 52,  red: 20, concrete: 4, ice: 10, poison: 14 },
+        { lv: 7, normal: 40,  red: 24, concrete: 8, ice: 12, poison: 16 },
+        { lv: 9, normal: 30,  red: 26, concrete: 12, ice: 14, poison: 18 },
+    ];
+
     const POWER_TYPES = {
         expand: { label: '↔', color: '#4dabf7', name: '加宽球拍', weight: 28 },
         multi:  { label: '✦', color: '#ffd43b', name: '多球分裂', weight: 26 },
@@ -923,7 +935,6 @@
         score:  { label: '★', color: '#f783ac', name: '加分 300', weight: 16 },
         // —— 负面道具：深色胶囊，要主动躲 ——
         shrink: { label: '✂', color: '#ff5566', name: '球拍变窄！', weight: 11, bad: true },
-        freeze: { label: '❄', color: '#74c0fc', name: '平台冻结！', weight: 11, bad: true },
     };
 
     // 连击反馈阈值
@@ -1096,6 +1107,12 @@
     }
 
     let audioCtx = null;
+    let dreamTrackTimer = null;  // 中毒时的迷离音轨
+    let fastTrackTimer = null;   // 火球强化时的快节奏音轨
+    let exciteCount = 0;         // 激动模式：连续击碎砖块计数（满 5 触发火球）
+    let alarmTimer = 0;          // 全屏警报边框剩余秒数
+    let alarmColor = '#4aff66';  // 警报边框颜色（中毒=绿，火球=红）
+    function setAlarm(color) { alarmTimer = 3; alarmColor = color; }
     function ensureAudio() {
         try {
             if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -1112,6 +1129,24 @@
             const gain = audioCtx.createGain();
             osc.type = type;
             osc.frequency.setValueAtTime(freq, t0);
+            gain.gain.setValueAtTime(volume, t0);
+            gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
+            osc.connect(gain); gain.connect(audioCtx.destination);
+            osc.start(t0); osc.stop(t0 + duration);
+        } catch (_) {}
+    }
+    function slideTone(fromFreq, toFreq, duration, type = 'sawtooth', volume = 0.1, delay = 0) {
+        // 频率滑移（变调）：从 fromFreq 平滑滑到 toFreq
+        if (muted) return;
+        try {
+            ensureAudio();
+            if (!audioCtx) return;
+            const t0 = audioCtx.currentTime + delay;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = type;
+            osc.frequency.setValueAtTime(fromFreq, t0);
+            osc.frequency.linearRampToValueAtTime(toFreq, t0 + duration);
             gain.gain.setValueAtTime(volume, t0);
             gain.gain.exponentialRampToValueAtTime(0.001, t0 + duration);
             osc.connect(gain); gain.connect(audioCtx.destination);
@@ -1157,12 +1192,71 @@
         over()    { arpeggio([392, 330, 262, 196, 131], 0.11, 0.075, 'square'); },
         clear()   { arpeggio([523, 659, 784, 1047, 1319, 1568], 0.075, 0.085, 'square'); tone(65, 0.65, 'sine', 0.08); },
         jackpot() { arpeggio([784, 988, 1175, 1568, 1976, 2349], 0.05, 0.08, 'square'); },
+        red()     { tone(200, 0.07, 'sawtooth', 0.08); noiseBurst(0.04, 0.03, 700); },
+        concrete(){ tone(110, 0.08, 'triangle', 0.1); tone(70, 0.1, 'sine', 0.09); },
+        ice()     { tone(1100, 0.09, 'square', 0.06); arpeggio([1568, 2093], 0.04, 0.05, 'sine'); },
+        poison()  { slideTone(300, 110, 0.5, 'sawtooth', 0.08); tone(240, 0.12, 'sawtooth', 0.07); noiseBurst(0.14, 0.05, 300); },
+        fire()    { slideTone(220, 880, 0.35, 'sawtooth', 0.09); noiseBurst(0.22, 0.08, 1800); tone(1760, 0.12, 'triangle', 0.05); },
     };
+
+    // 中毒：迷离音轨（轻微失谐的双音慢速嗡鸣 + 漂移滑音 + 空气感泛音），中毒消失即停止
+    function startDreamTrack() {
+        if (dreamTrackTimer != null || muted) return;
+        let step = 0;
+        const play = () => {
+            // 微失谐双音：两个相近频率叠加产生缓慢“漂移/回旋”的迷离感
+            tone(180, 0.5, 'sine', 0.045);
+            tone(184, 0.5, 'sine', 0.038);
+            // 每 3 拍一次空气感滑音上行
+            if (step % 3 === 0) slideTone(430 + (step % 4) * 40, 470 + (step % 4) * 50, 0.4, 'sine', 0.03);
+            // 高频淡淡泛音，若隐若现
+            if (step % 2 === 0) tone(920, 0.25, 'triangle', 0.018);
+            step++;
+        };
+        play();
+        dreamTrackTimer = setInterval(play, 340);
+    }
+    function stopDreamTrack() {
+        if (dreamTrackTimer != null) { clearInterval(dreamTrackTimer); dreamTrackTimer = null; }
+    }
+
+    // 火球强化：快节奏电子音轨（4/4 底鼓 + 交替军鼓/踩镲 + 上行贝斯），火球消失即停止
+    function startFastTrack() {
+        if (fastTrackTimer != null || muted) return;
+        let step = 0;
+        const bassScale = [55, 55, 65, 55, 73, 55, 65, 82];   // 小调上行贝斯循环
+        const play = () => {
+            tone(150, 0.08, 'sine', 0.07);                    // 底鼓
+            if (step % 2 === 1) noiseBurst(0.02, 0.028, 5200); // 踩镲（偶数步）
+            if (step % 4 === 2) { tone(210, 0.06, 'square', 0.035); noiseBurst(0.03, 0.02, 2400); } // 军鼓
+            tone(bassScale[step % bassScale.length] * 2, 0.11, 'sawtooth', 0.035);                  // 贝斯线
+            step++;
+        };
+        play();
+        fastTrackTimer = setInterval(play, 160);
+    }
+    function stopFastTrack() {
+        if (fastTrackTimer != null) { clearInterval(fastTrackTimer); fastTrackTimer = null; }
+    }
 
     // ================= 工具 =================
     const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
     const rand = (a, b) => Math.random() * (b - a) + a;
     const randInt = (a, b) => Math.floor(rand(a, b + 1));
+
+    // 砖块类型分配：随关卡解锁、顶部行更硬
+    function brickTypeFor(lv, row, rows) {
+        let rule = BRICK_TYPE_RULES[0];
+        for (const r of BRICK_TYPE_RULES) if (lv >= r.lv) rule = r;
+        const topBias = 1 - row / rows;                    // 1(顶) → 0(底)
+        const w = { normal: rule.normal, red: rule.red, concrete: rule.concrete, ice: rule.ice, poison: rule.poison };
+        if (topBias > 0.75) { w.normal -= 12; w.red += 6; w.concrete += 6; }
+        if (topBias > 0.90) { w.concrete += 8; w.red += 4; }
+        let total = 0; for (const k in w) total += Math.max(0, w[k]);
+        let roll = Math.random() * total;
+        for (const k in w) { roll -= Math.max(0, w[k]); if (roll <= 0) return k; }
+        return BRICK_TYPE.normal;
+    }
 
     function ballSpeedFor(lv) { return Math.min(BALL_SPEED_BASE + (lv - 1) * BALL_SPEED_PER_LEVEL, BALL_SPEED_MAX); }
 
@@ -1189,7 +1283,6 @@
         if (lv === 3) return createTntChallenge();
         const rows = Math.min(BRICK_ROWS_BASE + Math.floor((lv - 1) / 2), BRICK_ROWS_MAX);
         const pattern = (lv - 1) % 4;   // 0 满排 / 1 棋盘 / 2 金字塔 / 3 条纹
-        const maxHp = lv >= 7 ? 4 : lv >= 4 ? 3 : lv >= 2 ? 2 : 1;
         const tntChance = Math.min(TNT_CHANCE_BASE + lv * TNT_CHANCE_PER_LEVEL, TNT_CHANCE_MAX);
         const result = [];
         for (let row = 0; row < rows; row++) {
@@ -1200,19 +1293,15 @@
                 else if (pattern === 3) place = row % 2 === 0 || col % 2 === 0;
                 if (!place) continue;
                 const tnt = Math.random() < tntChance;
-                // 越靠上的砖越硬（TNT 一击即爆，不吃硬度）
-                const hardness = (rows - row) / rows;                 // 1 顶部 → 0 底部
-                let hp = 1;
-                if (!tnt) {
-                    if (hardness > 0.75 && maxHp >= 2) hp = Math.min(maxHp, 2);
-                    if (hardness > 0.90 && maxHp >= 3) hp = Math.min(maxHp, 3);
-                    if (hardness > 0.96 && maxHp >= 4) hp = 4;
-                }
+                // TNT 强制为普通类型（1 击必碎必炸），否则可能成为混凝土/红砖而炸不掉
+                const type = tnt ? BRICK_TYPE.normal : brickTypeFor(lv, row, rows);
+                // 每种砖固定耐久：普通/冰/毒/TNT=1，红砖=3，混凝土不可碎（无 2 血）
+                const hp = type === BRICK_TYPE.red ? 3 : 1;
                 result.push({
                     x: brickAreaLeft + col * (brickWidth + BRICK_GAP),
                     y: AREA_TOP + row * (BRICK_HEIGHT + BRICK_GAP),
                     w: brickWidth, h: BRICK_HEIGHT,
-                    hp, maxHp: hp, alive: true, hitFlash: 0, tnt,
+                    hp, maxHp: hp, alive: true, hitFlash: 0, tnt, type,
                 });
             }
         }
@@ -1244,9 +1333,12 @@
 
     // ================= 球 =================
     function makeBall(x, y, vx, vy) {
-        return { x, y, r: ballRadiusNow(), vx, vy, trail: [] };
+        return { x, y, r: ballRadiusNow(), vx, vy, trail: [], freezeT: 0, poisonT: 0, fireT: 0, wobbleT: 0, smokePhase: 0 };
     }
     function resetBallsToPaddle() {
+        stopDreamTrack();                          // 重置时清理中毒迷离音轨
+        stopFastTrack();                           // 重置时清理火球快节奏音轨
+        exciteCount = 0;                           // 重置激动计数（火球随球重建消失）
         const speed = ballSpeedFor(level);
         const b = makeBall(paddle.x + paddle.w / 2, paddle.y - BALL_RADIUS - 1, 0, 0);
         b.speed = speed;
@@ -1656,9 +1748,22 @@
 
     // ================= 碰撞 =================
     // 销毁一块砖（直接击碎或爆炸波及共用）
-    function killBrick(brick, hx, hy) {
+    function killBrick(brick, hx, hy, ball) {
         brick.alive = false;
         combo = Math.min(combo + 1, COMBO_MAX);
+        // 激动模式：连续击碎砖块计数，满 5 次进入火球模式（15s，期间破砖自动续时）
+        if (ball) {
+            exciteCount++;
+            if (exciteCount >= 5) {
+                exciteCount = 0;
+                ball.fireT = 15;
+                SFX.fire();
+                startFastTrack();
+                setAlarm('#ff3b1f');                   // 火球：红色警报边框
+                shake = Math.max(shake, 6);
+                addFloatText(ball.x, ball.y - 22, '激动模式! 🔥 火球', '#ff9a3c', 18);
+            }
+        }
         let gain = 50 + (combo - 1) * 15 + (brick.maxHp - 1) * 20;
         gain *= 1 + 0.2 * buffLv('combo');                 // 连击大师
         if (edgeBoost) gain *= 2;                          // 贴边奖励：得分 ×2
@@ -1671,6 +1776,8 @@
         spawnBrickParticles(brick);
         maybeDropPowerup(brick);
         shake = Math.max(shake, combo >= COMBO_GOLD ? 5 : 3);
+        // 任何类型的 TNT 被摧毁都会连锁爆炸（带 type 的 TNT 也生效）
+        if (brick.tnt) explodeAt(brick);
     }
 
     // TNT 爆炸：波及半径内砖块全部摧毁，TNT 之间连锁引爆
@@ -1717,21 +1824,36 @@
         }
     }
 
-    function hitBrick(brick, ball) {
-        brick.hp--;
-        brick.hitFlash = 0.12;
-        if (brick.hp <= 0) {
-            killBrick(brick, ball.x, ball.y);
-            if (brick.tnt) {
-                explodeAt(brick);                          // TNT：爆炸 + 连锁
-            } else {
-                SFX.brick(brick.maxHp, combo);             // 音高随连击递进
-            }
-        } else {
-            addScore(edgeBoost ? 20 : 10);
-            SFX.brick(brick.hp, combo);
+    function spawnIceSlide(x, y) {
+        // 冰屑迸溅（更多、更亮）
+        for (let i = 0; i < 12; i++) {
+            particles.push({ kind: 'ice', x: x + rand(-5, 5), y: y + rand(-4, 4),
+                vx: rand(-55, 55), vy: rand(-70, -14), size: rand(3, 6),
+                color: i % 2 === 0 ? 'rgba(200,245,255,1)' : 'rgba(130,210,255,0.95)',
+                angle: rand(0, 6.28), spin: rand(-9, 9),
+                life: rand(0.4, 0.7), maxLife: 0.7 });
         }
-        // 反弹：按重叠量决定方向
+        // 打滑流光：沿水平方向侧滑的亮线（“打滑”感）
+        const dir = Math.random() < 0.5 ? -1 : 1;
+        for (let i = 0; i < 3; i++) {
+            particles.push({ kind: 'spark', x: x, y: y + rand(-1, 3),
+                vx: dir * rand(30, 80), vy: 0, size: rand(3, 5),
+                color: i === 0 ? 'rgba(240,252,255,0.95)' : 'rgba(150,220,255,0.7)',
+                angle: 0, spin: 0, life: 0.3, maxLife: 0.3 });
+        }
+    }
+
+    // 冰冻球打滑：沿水平方向滑行并加速（配合冰屑流光）
+    function applyIceSlide(ball) {
+        if (Math.abs(ball.vx) < 130) ball.vx = Math.sign(ball.vx || 1) * 130;   // 保证横向滑动
+        ball.vx *= 1.3;                                                           // 横向加速
+        const sp = Math.hypot(ball.vx, ball.vy);
+        const cap = 820;
+        if (sp > cap) { ball.vx *= cap / sp; ball.vy *= cap / sp; }
+        spawnIceSlide(ball.x, ball.y);
+    }
+
+    function bounceBall(brick, ball) {
         const cx = brick.x + brick.w / 2, cy = brick.y + brick.h / 2;
         const dx = ball.x - cx, dy = ball.y - cy;
         const overlapX = (brick.w / 2 + ball.r) - Math.abs(dx);
@@ -1743,12 +1865,66 @@
             ball.vy = -ball.vy;
             ball.y = dy > 0 ? brick.y + brick.h + ball.r : brick.y - ball.r;
         }
-        // 防止水平死循环
         const sp = Math.hypot(ball.vx, ball.vy);
         if (Math.abs(ball.vy) < sp * 0.22) {
             ball.vy = (ball.vy >= 0 ? 1 : -1) * sp * 0.22;
             ball.vx = Math.sign(ball.vx || 1) * Math.sqrt(Math.max(sp * sp - ball.vy * ball.vy, 0));
         }
+        // 冰冻球击中砖块：水平打滑并加速
+        if (ball.freezeT > 0) applyIceSlide(ball);
+    }
+
+    function hitBrick(brick, ball) {
+        // 混凝土：默认不可碎，仅小震动 + 闪灰 + 沉闷音，球照常反弹
+        if (brick.type === BRICK_TYPE.concrete) {
+            // 火球可熔穿混凝土
+            if (ball.fireT > 0) {
+                brick.hp = 0; brick.hitFlash = 0.12;
+                killBrick(brick, ball.x, ball.y, ball);
+                SFX.boom();
+                return bounceBall(brick, ball);
+            }
+            brick.hitFlash = 0.15; shake = Math.max(shake, 1); SFX.concrete();
+            exciteCount = 0;                                 // 未击碎：激动计数归零
+            return bounceBall(brick, ball);
+        }
+        // 火球一次熔穿 3 血红砖
+        if (ball.fireT > 0 && brick.type === BRICK_TYPE.red) {
+            brick.hp = 0; brick.hitFlash = 0.12;
+            killBrick(brick, ball.x, ball.y, ball);
+            SFX.red();
+            return bounceBall(brick, ball);
+        }
+        // 冰块砖：击碎并给球上冰冻（1 血）
+        if (brick.type === BRICK_TYPE.ice) {
+            brick.hp--; brick.hitFlash = 0.12;
+            killBrick(brick, ball.x, ball.y, ball);
+            if (ball.freezeT !== undefined) ball.freezeT = 15;
+            SFX.ice();
+            return bounceBall(brick, ball);
+        }
+        // 毒砖：击碎并给球上中毒（1 血）
+        if (brick.type === BRICK_TYPE.poison) {
+            brick.hp--; brick.hitFlash = 0.12;
+            killBrick(brick, ball.x, ball.y, ball);
+            if (ball.poisonT !== undefined) ball.poisonT = 15;
+            SFX.poison();
+            startDreamTrack();
+            setAlarm('#4aff66');                       // 中毒：绿色警报边框
+            return bounceBall(brick, ball);
+        }
+        brick.hp--;
+        brick.hitFlash = 0.12;
+        if (brick.hp <= 0) {
+            killBrick(brick, ball.x, ball.y, ball);
+            if (!brick.tnt) SFX.brick(brick.maxHp, combo);   // TNT 的爆炸音由 explodeAt 播放
+        } else {
+            exciteCount = 0;                                 // 未击碎（红砖前两击等）：激动计数归零
+            addScore(edgeBoost ? 20 : 10);
+            if (brick.type === BRICK_TYPE.red) { spawnBrickParticles(brick, 'crack'); SFX.red(); }
+            else SFX.brick(brick.hp, combo);
+        }
+        bounceBall(brick, ball);
     }
 
     function updateBalls(dt) {
@@ -1758,6 +1934,43 @@
         for (let bi = balls.length - 1; bi >= 0; bi--) {
             const ball = balls[bi];
             if (ball.vx === 0 && ball.vy === 0) continue;   // 待发射
+
+            // 特效计时
+            if (ball.freezeT > 0) { ball.freezeT -= dt; ball.smokePhase += dt * 4; }
+            if (ball.poisonT > 0) {
+                ball.poisonT -= dt;
+                ball.smokePhase += dt * 4;
+                // 轨迹不稳：随机较大偏转（旋转拐弯更明显）
+                ball.wobbleT -= dt;
+                if (ball.wobbleT <= 0) {
+                    ball.wobbleT = rand(0.28, 0.5);
+                    const ang = rand(-0.6, 0.6);
+                    const sp = Math.hypot(ball.vx, ball.vy);
+                    if (sp > 1) {
+                        const na = Math.atan2(ball.vy, ball.vx) + ang;
+                        ball.vx = sp * Math.cos(na); ball.vy = sp * Math.sin(na);
+                    }
+                }
+                // 持续冒毒烟（亮绿，黑底上更明显）
+                for (let i = 0; i < 2; i++) {
+                    particles.push({ kind: 'smoke', x: ball.x + rand(-4, 4), y: ball.y + rand(-4, 4),
+                        vx: rand(-16, 16), vy: rand(-26, -8), size: rand(7, 13),
+                        color: 'rgba(170,255,80,0.75)', angle: 0, spin: 0,
+                        life: rand(0.5, 0.9), maxLife: 0.9 });
+                }
+            }
+            // 激动模式（火球）：计时并持续喷发火焰粒子
+            if (ball.fireT > 0) {
+                ball.fireT -= dt;
+                ball.smokePhase += dt * 5;
+                for (let i = 0; i < 2; i++) {
+                    const fl = randInt(0, 2);
+                    particles.push({ kind: 'fire', x: ball.x + rand(-3, 3), y: ball.y + rand(-3, 3),
+                        vx: rand(-20, 20), vy: rand(-46, -16), size: rand(6, 11),
+                        color: fl === 0 ? '#ffd93d' : fl === 1 ? '#ff7a1f' : '#ff3b1f',
+                        angle: 0, spin: rand(-8, 8), life: rand(0.3, 0.6), maxLife: 0.6 });
+                }
+            }
 
             // 子步进防穿模
             const dist = Math.hypot(ball.vx, ball.vy) * dt * moveMul;
@@ -1801,6 +2014,8 @@
                         combo = 0;                       // 拍心击球重置连击
                         SFX.paddle();
                     }
+                    // 冰冻球击中滑板：水平打滑并加速
+                    if (ball.freezeT > 0) applyIceSlide(ball);
                 }
 
                 // 顶部球拍（双人模式 P2，←/-> 控制）
@@ -1848,6 +2063,10 @@
             ball.trail.push({ x: ball.x, y: ball.y });
             if (ball.trail.length > 10) ball.trail.shift();
         }
+        // 中毒消失：停止迷离音轨（所有球都不再中毒）
+        if (dreamTrackTimer != null && !balls.some(b => b.poisonT > 0)) stopDreamTrack();
+        // 火球消失：停止快节奏音轨（所有球都不再是火球）
+        if (fastTrackTimer != null && !balls.some(b => b.fireT > 0)) stopFastTrack();
     }
 
     // ================= 左右分屏双人对战 =================
@@ -2099,7 +2318,7 @@
             }
 
             // 通关判定 -> 进入抽卡阶段
-            if (state === 'playing' && bricks.every(b => !b.alive)) {
+            if (state === 'playing' && bricks.every(b => !b.alive || b.type === BRICK_TYPE.concrete)) {
                 const bonus = addScore(300 + (level - 1) * 50);
                 addFloatText(W / 2, H / 2 - 40, '通关奖励 +' + bonus, '#ffd43b', 20);
                 SFX.clear();
@@ -2143,6 +2362,7 @@
         for (const b of bricks) if (b.hitFlash > 0) b.hitFlash -= dt;
 
         shake = Math.max(0, shake - dt * 40);
+        if (alarmTimer > 0) alarmTimer -= dt;
         if (flashAlpha > 0) {
             flashAlpha -= dt * 1.6;
             if (flashAlpha < 0) flashAlpha = 0;
@@ -2202,10 +2422,131 @@
         ctx.stroke();
     }
 
+    function drawRedBrick(b) {
+        // 砖体：陶土红渐变
+        const g = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.h);
+        g.addColorStop(0, '#d06a52'); g.addColorStop(0.5, '#b04a36'); g.addColorStop(1, '#7d2a1c');
+        ctx.fillStyle = g; roundRect(ctx, b.x, b.y, b.w, b.h, 3); ctx.fill();
+        // 顶部受光 + 底部阴影（立体感）
+        ctx.fillStyle = 'rgba(255,255,255,0.20)';
+        roundRect(ctx, b.x + 1.5, b.y + 1.5, b.w - 3, b.h * 0.28, 2); ctx.fill();
+        ctx.fillStyle = 'rgba(0,0,0,0.22)';
+        roundRect(ctx, b.x + 1.5, b.y + b.h * 0.72, b.w - 3, b.h * 0.24, 2); ctx.fill();
+        // 砖缝：横线 + 错缝竖线
+        ctx.strokeStyle = 'rgba(90,20,10,0.6)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(b.x + 2, b.y + b.h * 0.5); ctx.lineTo(b.x + b.w - 2, b.y + b.h * 0.5); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(b.x + b.w * 0.28, b.y + 2); ctx.lineTo(b.x + b.w * 0.28, b.y + b.h * 0.5); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(b.x + b.w * 0.66, b.y + b.h * 0.5); ctx.lineTo(b.x + b.w * 0.66, b.y + b.h - 2); ctx.stroke();
+        // 砖面颗粒
+        ctx.fillStyle = 'rgba(120,30,18,0.35)';
+        for (let i = 0; i < 4; i++) {
+            const px = b.x + ((b.x * 3 + i * 7) % Math.max(1, b.w));
+            const py = b.y + ((b.y * 5 + i * 11) % Math.max(1, b.h));
+            ctx.fillRect(px, py, 1.5, 1.5);
+        }
+        const lost = b.maxHp - b.hp;                          // 已损失血量 = 裂缝数
+        if (lost > 0) {
+            ctx.strokeStyle = 'rgba(30,0,0,0.75)'; ctx.lineWidth = 1.5;
+            for (let i = 0; i < lost; i++) {
+                const bx = b.x + b.w * (0.25 + 0.5 * i / Math.max(1, b.maxHp - 1));
+                ctx.beginPath();
+                ctx.moveTo(bx, b.y + 2);
+                ctx.lineTo(bx - 4, b.y + b.h * 0.5);
+                ctx.lineTo(bx + 3, b.y + b.h - 2);
+                ctx.stroke();
+            }
+        }
+        if (b.hp > 0) {
+            const pipW = 7, gap = 3, totalW = b.hp * pipW + (b.hp - 1) * gap;
+            let px = b.x + (b.w - totalW) / 2;
+            for (let i = 0; i < b.hp; i++) { ctx.fillStyle = 'rgba(255,255,255,0.85)'; roundRect(ctx, px, b.y + b.h - 6, pipW, 2.5, 1.25); ctx.fill(); px += pipW + gap; }
+        }
+        if (b.hitFlash > 0) { ctx.fillStyle = `rgba(255,255,255,${b.hitFlash * 5})`; roundRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.fill(); }
+        ctx.strokeStyle = 'rgba(0,0,0,0.25)'; ctx.lineWidth = 1; roundRect(ctx, b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1, 4); ctx.stroke();
+    }
+
+    function drawConcreteBrick(b) {
+        const g = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.h);
+        g.addColorStop(0, '#a8afb8'); g.addColorStop(0.5, '#868d96'); g.addColorStop(1, '#5d636b');
+        ctx.fillStyle = g; roundRect(ctx, b.x, b.y, b.w, b.h, 3); ctx.fill();
+        // 骨料斑点（确定性伪随机，用砖坐标做种子）
+        for (let i = 0; i < 7; i++) {
+            const sx = b.x + ((b.x * 7 + i * 13) % Math.max(1, b.w));
+            const sy = b.y + ((b.y * 11 + i * 17) % Math.max(1, b.h));
+            ctx.fillStyle = i % 2 === 0 ? 'rgba(60,64,70,0.5)' : 'rgba(200,205,212,0.4)';
+            ctx.beginPath(); ctx.arc(sx, sy, 1.4, 0, Math.PI * 2); ctx.fill();
+        }
+        // 表面横纹
+        ctx.strokeStyle = 'rgba(40,43,48,0.35)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(b.x + 2, b.y + b.h * 0.72); ctx.lineTo(b.x + b.w - 2, b.y + b.h * 0.72); ctx.stroke();
+        // 铆钉
+        ctx.fillStyle = 'rgba(220,224,230,0.7)';
+        ctx.beginPath(); ctx.arc(b.x + b.w * 0.2, b.y + b.h * 0.3, 2.2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(60,64,70,0.8)';
+        ctx.beginPath(); ctx.arc(b.x + b.w * 0.2, b.y + b.h * 0.3, 1, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(220,224,230,0.7)';
+        ctx.beginPath(); ctx.arc(b.x + b.w * 0.8, b.y + b.h * 0.72, 2.2, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = 'rgba(60,64,70,0.8)';
+        ctx.beginPath(); ctx.arc(b.x + b.w * 0.8, b.y + b.h * 0.72, 1, 0, Math.PI * 2); ctx.fill();
+        if (b.hitFlash > 0) { ctx.fillStyle = `rgba(255,255,255,${b.hitFlash * 4})`; roundRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.fill(); }
+        ctx.strokeStyle = 'rgba(30,32,36,0.5)'; ctx.lineWidth = 1.5; roundRect(ctx, b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1, 3); ctx.stroke();
+    }
+
+    function drawIceBrick(b) {
+        ctx.save(); ctx.globalAlpha = 0.9;
+        const g = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.h);
+        g.addColorStop(0, 'rgba(226,248,255,0.95)'); g.addColorStop(0.5, 'rgba(150,220,255,0.88)'); g.addColorStop(1, 'rgba(80,150,255,0.82)');
+        ctx.fillStyle = g; roundRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.fill();
+        ctx.globalAlpha = 1;
+        // 斜向水晶棱面
+        ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(b.x + b.w * 0.2, b.y + b.h); ctx.lineTo(b.x + b.w * 0.45, b.y); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(b.x + b.w * 0.55, b.y + b.h); ctx.lineTo(b.x + b.w * 0.8, b.y); ctx.stroke();
+        // 玻璃高光
+        ctx.fillStyle = 'rgba(255,255,255,0.55)';
+        roundRect(ctx, b.x + 3, b.y + 3, b.w - 6, b.h * 0.32, 3); ctx.fill();
+        // 冰晶雪花
+        ctx.fillStyle = 'rgba(255,255,255,0.95)'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('❄', b.x + b.w / 2, b.y + b.h / 2);
+        ctx.font = '7px sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.7)';
+        ctx.fillText('✦', b.x + b.w * 0.18, b.y + b.h * 0.75);
+        ctx.fillText('✦', b.x + b.w * 0.85, b.y + b.h * 0.3);
+        if (b.hitFlash > 0) { ctx.fillStyle = `rgba(255,255,255,${b.hitFlash * 5})`; roundRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.fill(); }
+        ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 1; roundRect(ctx, b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1, 4); ctx.stroke();
+        ctx.restore();
+    }
+
+    function drawPoisonBrick(b) {
+        // 黑色毒底
+        const g = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.h);
+        g.addColorStop(0, '#3a3a46'); g.addColorStop(0.5, '#1a1a22'); g.addColorStop(1, '#09090d');
+        ctx.fillStyle = g; roundRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.fill();
+        // 顶部暗绿毒雾高光
+        ctx.fillStyle = 'rgba(140,255,70,0.16)';
+        roundRect(ctx, b.x + 2, b.y + 2, b.w - 4, b.h * 0.3, 3); ctx.fill();
+        // 酸性绿描边（黑色主体上提亮）
+        ctx.strokeStyle = 'rgba(160,255,80,0.55)'; ctx.lineWidth = 1.5;
+        roundRect(ctx, b.x + 1, b.y + 1, b.w - 2, b.h - 2, 4); ctx.stroke();
+        // 毒液滴（黑底上的荧光绿）
+        ctx.fillStyle = 'rgba(150,255,70,0.9)';
+        ctx.beginPath(); ctx.arc(b.x + b.w * 0.2, b.y + b.h * 0.3, 2.6, 0, Math.PI * 2); ctx.fill();
+        ctx.beginPath(); ctx.arc(b.x + b.w * 0.8, b.y + b.h * 0.68, 2.2, 0, Math.PI * 2); ctx.fill();
+        // 骷髅标记
+        ctx.fillStyle = 'rgba(210,255,180,0.92)'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText('☠', b.x + b.w / 2, b.y + b.h / 2 - 2);
+        if (b.hitFlash > 0) { ctx.fillStyle = `rgba(255,255,255,${b.hitFlash * 5})`; roundRect(ctx, b.x, b.y, b.w, b.h, 4); ctx.fill(); }
+        ctx.strokeStyle = 'rgba(0,0,0,0.8)'; ctx.lineWidth = 1; roundRect(ctx, b.x + 0.5, b.y + 0.5, b.w - 1, b.h - 1, 4); ctx.stroke();
+    }
+
     function drawBricks() {
         for (const b of bricks) {
             if (!b.alive) continue;
             if (b.tnt) { drawTntBrick(b); continue; }
+            if (b.type === BRICK_TYPE.concrete) { drawConcreteBrick(b); continue; }
+            if (b.type === BRICK_TYPE.red)      { drawRedBrick(b); continue; }
+            if (b.type === BRICK_TYPE.ice)      { drawIceBrick(b); continue; }
+            if (b.type === BRICK_TYPE.poison)   { drawPoisonBrick(b); continue; }
             const tier = TIER_COLORS[clamp(b.maxHp, 1, 4)];
             const g = ctx.createLinearGradient(b.x, b.y, b.x, b.y + b.h);
             g.addColorStop(0, tier.top);
@@ -2348,19 +2689,23 @@
     function drawBalls() {
         const skin = ballSkin();
         for (const b of balls) {
-            // 拖尾（高连击更长更亮）
+            // 特效覆盖的拖尾颜色与辉光
+            let trail = skin.trail, glow = skin.glow;
+            if (b.freezeT > 0) { trail = [150, 220, 255]; glow = '#7fd0ff'; }
+            if (b.poisonT > 0) { trail = [170, 255, 80]; glow = '#a8ff50'; }
+            if (b.fireT > 0)   { trail = [255, 140, 40]; glow = '#ff7a1f'; }   // 火球优先覆盖
             const boost = skin.hot ? 1.5 : 1;
             for (let i = 0; i < b.trail.length; i++) {
                 const t = b.trail[i];
                 const a = (i / b.trail.length) * 0.35 * boost;
-                const [tr, tg, tb] = skin.trail;
+                const [tr, tg, tb] = trail;
                 ctx.fillStyle = `rgba(${tr},${tg},${tb},${Math.min(a, 0.55)})`;
                 ctx.beginPath();
                 ctx.arc(t.x, t.y, b.r * (0.3 + 0.6 * i / b.trail.length) * boost, 0, Math.PI * 2);
                 ctx.fill();
             }
             ctx.save();
-            ctx.shadowColor = skin.glow;
+            ctx.shadowColor = glow;
             ctx.shadowBlur = 16 + (skin.hot ? 8 : 0);
             const g = ctx.createRadialGradient(b.x - b.r * 0.3, b.y - b.r * 0.35, b.r * 0.1, b.x, b.y, b.r);
             g.addColorStop(0, skin.c0);
@@ -2371,6 +2716,58 @@
             ctx.arc(b.x, b.y, b.r, 0, Math.PI * 2);
             ctx.fill();
             ctx.restore();
+            // 冰冻冰壳：更厚更亮 + 冰晶尖刺
+            if (b.freezeT > 0) {
+                ctx.save(); ctx.globalAlpha = 0.75;
+                const ig = ctx.createRadialGradient(b.x, b.y, b.r * 0.3, b.x, b.y, b.r * 1.15);
+                ig.addColorStop(0, '#ffffff'); ig.addColorStop(0.55, '#c8f0ff'); ig.addColorStop(1, '#4a9de0');
+                ctx.fillStyle = ig;
+                ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.05, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+                // 冰晶尖刺
+                ctx.strokeStyle = 'rgba(220,248,255,0.9)'; ctx.lineWidth = 2;
+                for (let s = 0; s < 6; s++) {
+                    const a = b.smokePhase * 0.7 + s * Math.PI / 3;
+                    const inner = b.r + 1, outer = b.r + 4 + 2 * Math.sin(b.smokePhase + s);
+                    ctx.beginPath();
+                    ctx.moveTo(b.x + Math.cos(a - 0.18) * inner, b.y + Math.sin(a - 0.18) * inner);
+                    ctx.lineTo(b.x + Math.cos(a) * outer, b.y + Math.sin(a) * outer);
+                    ctx.lineTo(b.x + Math.cos(a + 0.18) * inner, b.y + Math.sin(a + 0.18) * inner);
+                    ctx.stroke();
+                }
+                ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.05, 0, Math.PI * 2); ctx.stroke();
+            }
+            // 中毒黑烟光环：更大更浓
+            if (b.poisonT > 0) {
+                ctx.save(); ctx.globalAlpha = 0.6 + 0.2 * Math.sin(b.smokePhase);
+                const pg = ctx.createRadialGradient(b.x, b.y, b.r * 0.1, b.x, b.y, b.r * 2.4);
+                pg.addColorStop(0, 'rgba(20,40,10,0)'); pg.addColorStop(0.45, 'rgba(60,110,20,0.55)'); pg.addColorStop(0.8, 'rgba(20,40,8,0.45)'); pg.addColorStop(1, 'rgba(10,20,4,0)');
+                ctx.fillStyle = pg;
+                ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 2.4, 0, Math.PI * 2); ctx.fill();
+                ctx.restore();
+                // 毒气漩涡
+                ctx.strokeStyle = 'rgba(150,255,80,0.5)'; ctx.lineWidth = 1.5;
+                ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.7, b.smokePhase, b.smokePhase + 3.2); ctx.stroke();
+            }
+            // 激动模式：火球外壳（橙红渐变 + 跳动外焰）
+            if (b.fireT > 0) {
+                ctx.save();
+                const pulse = 0.55 + 0.3 * Math.sin(b.smokePhase * 3);
+                const fg = ctx.createRadialGradient(b.x, b.y, b.r * 0.2, b.x, b.y, b.r * 2.3);
+                fg.addColorStop(0, 'rgba(255,255,205,0.95)');
+                fg.addColorStop(0.35, 'rgba(255,145,45,0.75)');
+                fg.addColorStop(0.72, 'rgba(255,70,20,' + (0.4 * pulse) + ')');
+                fg.addColorStop(1, 'rgba(255,40,10,0)');
+                ctx.fillStyle = fg;
+                ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 2.3, 0, Math.PI * 2); ctx.fill();
+                // 跳动外焰（两道弧线）
+                ctx.strokeStyle = 'rgba(255,175,60,0.85)'; ctx.lineWidth = 2.5;
+                ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.25, b.smokePhase * 0.6, b.smokePhase * 0.6 + 4.6); ctx.stroke();
+                ctx.strokeStyle = 'rgba(255,120,30,0.7)'; ctx.lineWidth = 2;
+                ctx.beginPath(); ctx.arc(b.x, b.y, b.r * 1.05, -b.smokePhase * 0.9, -b.smokePhase * 0.9 + 4.2); ctx.stroke();
+                ctx.restore();
+            }
         }
     }
 
@@ -2443,6 +2840,16 @@
             } else if (p.kind === 'confetti') {
                 ctx.globalCompositeOperation = 'source-over';
                 ctx.fillRect(-p.size / 2, -p.size * 0.25, p.size, p.size * 0.5);
+                ctx.globalCompositeOperation = 'lighter';
+            } else if (p.kind === 'ice') {
+                ctx.beginPath(); ctx.arc(0, 0, p.size, 0, Math.PI * 2); ctx.fill();
+            } else if (p.kind === 'fire') {
+                ctx.beginPath(); ctx.arc(0, 0, p.size, 0, Math.PI * 2); ctx.fill();
+            } else if (p.kind === 'smoke') {
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.globalAlpha = (p.life / p.maxLife) * 0.65;
+                ctx.fillStyle = p.color;
+                ctx.beginPath(); ctx.arc(0, 0, p.size, 0, Math.PI * 2); ctx.fill();
                 ctx.globalCompositeOperation = 'lighter';
             } else {
                 ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size);
@@ -2662,12 +3069,30 @@
                 ctx.fillStyle = s.color;
                 ctx.fillText(s.text, W - 14 - i * 130, H - 12);
             });
-            // 连击表
-            if (combo >= COMBO_FIRE) {
-                ctx.fillStyle = combo >= COMBO_GOLD ? '#ffe98a' : '#ffd43b';
-                ctx.font = `bold ${14 + Math.min(combo, COMBO_GOLD)}px "Segoe UI", sans-serif`;
-                ctx.textBaseline = 'top';
-                ctx.fillText(`COMBO ×${combo}`, W - 14, 12);
+            // 连击计数：始终显示，随连击档位升级变色，附向下一档的进度条
+            {
+                const tier = combo >= COMBO_GOLD ? '#ffe98a'
+                    : combo >= COMBO_HOT  ? '#38d9ff'
+                    : combo >= COMBO_FIRE ? '#ffd43b'
+                    : 'rgba(190,210,235,0.95)';
+                const size = 15 + Math.min(combo, COMBO_GOLD);
+                ctx.textAlign = 'right'; ctx.textBaseline = 'top';
+                ctx.font = `bold ${size}px "Segoe UI", sans-serif`;
+                ctx.shadowColor = tier; ctx.shadowBlur = combo >= COMBO_FIRE ? 10 : 0;
+                ctx.fillStyle = tier;
+                ctx.fillText(`连击 ×${combo}`, W - 14, 12);
+                ctx.shadowBlur = 0;
+                // 进度条：向下一档连击
+                if (combo < COMBO_GOLD) {
+                    const next = combo < COMBO_FIRE ? COMBO_FIRE : combo < COMBO_HOT ? COMBO_HOT : COMBO_GOLD;
+                    const prev = combo < COMBO_FIRE ? 0 : combo < COMBO_HOT ? COMBO_FIRE : COMBO_HOT;
+                    const pct = (combo - prev) / (next - prev);
+                    const bw = 90, bx = W - 14 - bw, by = 12 + size + 4;
+                    ctx.fillStyle = 'rgba(120,140,170,0.25)';
+                    ctx.fillRect(bx, by, bw, 3);
+                    ctx.fillStyle = tier;
+                    ctx.fillRect(bx, by, Math.max(1, bw * pct), 3);
+                }
             }
             // 秘籍开启标识
             if (infiniteLives) {
@@ -2716,6 +3141,36 @@
         if (flashAlpha > 0) {
             ctx.fillStyle = `rgba(255,60,80,${flashAlpha * 0.32})`;
             ctx.fillRect(-20, -20, W + 40, H + 40);
+        }
+
+        // 警报边框：中毒=绿 / 火球=红，整屏抖动边框警告 3 秒
+        if (alarmTimer > 0) {
+            const pulse = 0.6 + 0.4 * Math.sin(performance.now() / 60);
+            const t = alarmTimer;
+            // 抖动位移
+            const jx = rand(-3, 3), jy = rand(-3, 3);
+            ctx.save();
+            ctx.translate(jx, jy);
+            // 外圈呼吸边框（两层：粗内框 + 细外框，脉冲呼吸）
+            ctx.strokeStyle = alarmColor;
+            ctx.globalAlpha = Math.min(1, t) * pulse;
+            ctx.lineWidth = 7;
+            ctx.strokeRect(4, 4, W - 8, H - 8);
+            ctx.globalAlpha = Math.min(1, t) * pulse * 0.7;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(1, 1, W - 2, H - 2);
+            // 四角警示亮块
+            const c = alarmColor, size = 26;
+            ctx.globalAlpha = Math.min(1, t) * pulse;
+            ctx.fillStyle = c;
+            const cs = [[2, 2, 1, 1], [W - size - 2, 2, -1, 1], [2, H - size - 2, 1, -1], [W - size - 2, H - size - 2, -1, -1]];
+            for (const [cx, cy, sx, sy] of cs) {
+                ctx.beginPath();
+                ctx.moveTo(cx, cy + size * sy); ctx.lineTo(cx, cy); ctx.lineTo(cx + size * sx, cy);
+                ctx.lineTo(cx + size * sx * 0.6, cy + size * sy * 0.6);
+                ctx.closePath(); ctx.fill();
+            }
+            ctx.restore();
         }
 
         ctx.restore();
@@ -2767,14 +3222,11 @@
         const k = e.key;
         // 输入框内不触发游戏快捷键与秘籍
         if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
-        // KOB 秘籍序列（再输入一次 KOB 也可关闭）
-        if (/^[a-zA-Z]$/.test(k)) {
-            devBuffer = (devBuffer + k.toLowerCase()).slice(-8);
-            if (devBuffer.endsWith('kob')) {
-                devBuffer = '';
-                toggleDevPanel();
-                return;
-            }
+        // KOB 秘籍：Ctrl/Cmd + Shift + K 呼出/关闭（避免误触）
+        if ((e.ctrlKey || e.metaKey) && e.shiftKey && (k === 'k' || k === 'K')) {
+            e.preventDefault();
+            toggleDevPanel();
+            return;
         }
         // 秘籍弹窗打开时：仅 Esc 可关闭，其余按键屏蔽
         if (devOpen) {
@@ -2800,7 +3252,7 @@
         }
         else if (k === 'm' || k === 'M') toggleMute();
         else if (k === 'f' || k === 'F') toggleFullscreen();
-        else if (k === 'r' || k === 'R') { if (state === 'gameover') restart(); }
+        else if (k === 'r' || k === 'R') { if (state === 'gameover') { twoPlayer ? restart() : restartLevel(); } }
     });
     window.addEventListener('keyup', (e) => {
         const k = e.key;
@@ -2914,6 +3366,7 @@
     }
     function closeDevPanel() {
         devOpen = false;
+        devBuffer = '';                        // 关闭后清空按键缓存，避免残留再触发
         devPanel.classList.remove('active');
     }
     function toggleDevPanel() {
@@ -3039,6 +3492,25 @@
             const checkpoint = readSlot(slot);
             startGame(slot, checkpoint);         // 单人死亡后从最近的三关检查点继续
         }
+        window.focus();
+    }
+
+    // 失败后重开当前关卡（保留本局累计分数，重置生命与砖块）
+    function restartLevel() {
+        stopDreamTrack(); stopFastTrack(); exciteCount = 0;
+        lives = MAX_LIVES;
+        updateLivesUI();
+        combo = 0; edgeBoost = false;
+        expandTimer = shrinkTimer = freezeTimer = 0;
+        paddle.targetW = basePaddleWidth();
+        paddle2.x = (W - paddle2.w) / 2;
+        powerups = [];
+        particles = [];
+        bricks = createBricks(level);
+        resetBallsToPaddle();
+        state = 'serving';
+        stage.classList.remove('playing');
+        modalOverlay.classList.remove('active');
         window.focus();
     }
 

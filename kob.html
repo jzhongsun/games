@@ -178,15 +178,26 @@
             color: var(--text);
         }
         .btn-secondary:hover { border-color: #2e4368; }
-        .slot-list { display: flex; flex-direction: column; gap: 8px; }
+        .start-card.slot-picker-active {
+            width: 520px;
+            padding: 32px 36px 28px;
+        }
+        .start-card.slot-picker-active .mode-select,
+        .start-card.slot-picker-active .music-picker,
+        .start-card.slot-picker-active .start-hint {
+            display: none;
+        }
+        .start-card.slot-picker-active .start-sub { margin-bottom: 24px; }
+        .slot-list { display: flex; flex-direction: column; gap: 12px; }
         .slot-item {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 14px;
+            min-height: 68px;
             background: #101a2e;
             border: 1px solid var(--panel-edge);
-            border-radius: 10px;
-            padding: 10px 14px;
+            border-radius: 12px;
+            padding: 13px 16px;
             cursor: pointer;
             transition: 0.15s;
             color: var(--text);
@@ -198,20 +209,20 @@
         .slot-item:disabled { opacity: 0.4; cursor: not-allowed; }
         .slot-item .slot-badge {
             flex: none;
-            width: 26px; height: 26px;
+            width: 34px; height: 34px;
             border-radius: 50%;
             background: #1a2946;
             border: 1px solid #2a3f66;
-            font-size: 13px; font-weight: 800;
+            font-size: 14px; font-weight: 800;
             display: flex; align-items: center; justify-content: center;
             color: var(--accent);
         }
         .slot-item .slot-info { flex: 1; min-width: 0; }
-        .slot-item .slot-line1 { font-size: 14px; font-weight: 600; }
-        .slot-item .slot-line2 { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+        .slot-item .slot-line1 { display: block; font-size: 14px; font-weight: 600; line-height: 1.4; }
+        .slot-item .slot-line2 { display: block; font-size: 11px; color: var(--text-dim); margin-top: 4px; }
         .slot-item .slot-action { flex: none; font-size: 12px; color: var(--accent); font-weight: 700; }
         .btn-back {
-            margin-top: 12px;
+            margin-top: 18px;
             background: none;
             border: none;
             color: var(--text-dim);
@@ -590,6 +601,124 @@
         #btn-restart:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(56,217,255,0.35); }
         #modal-hint { margin-top: 14px; font-size: 11px; color: var(--text-dim); }
 
+        /* ===== PC 横屏布局 ===== */
+        @media (min-width: 1100px) and (min-height: 680px) {
+            body {
+                padding: 18px;
+                overflow: hidden;
+            }
+            #game-wrapper {
+                --stage-width: min(1120px, calc((100vh - 72px) * 4 / 3), calc(100vw - 356px));
+                width: calc(var(--stage-width) + 320px);
+                height: min(940px, calc(100vh - 36px));
+                display: grid;
+                grid-template-columns: var(--stage-width) 270px;
+                grid-template-rows: minmax(0, 1fr) auto;
+                grid-template-areas:
+                    "stage header"
+                    "stage footer";
+                gap: 16px 18px;
+                padding: 16px;
+            }
+            #game-stage {
+                grid-area: stage;
+                width: var(--stage-width);
+                aspect-ratio: 4 / 3;
+                align-self: center;
+                justify-self: center;
+            }
+            #gameCanvas {
+                width: 100%;
+                height: 100%;
+            }
+            #header {
+                grid-area: header;
+                min-width: 0;
+                flex-direction: column;
+                justify-content: flex-start;
+                align-items: stretch;
+                flex-wrap: nowrap;
+                gap: 18px;
+                padding: 8px 4px 0;
+            }
+            .game-title {
+                font-size: 28px;
+                letter-spacing: 3px;
+            }
+            .game-title small {
+                margin-top: 3px;
+                font-size: 12px;
+            }
+            .hud {
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                gap: 10px;
+                width: 100%;
+            }
+            .hud-item {
+                min-height: 68px;
+                justify-content: center;
+                padding: 9px 6px;
+                border: 1px solid rgba(42, 63, 102, 0.72);
+                border-radius: 11px;
+                background: rgba(7, 11, 20, 0.46);
+            }
+            .hud-item .hud-value { font-size: 21px; }
+            .hud-item .hud-label { letter-spacing: 2px; }
+            #btn-fullscreen,
+            #btn-mute {
+                width: 100%;
+                height: 42px;
+            }
+            #footer {
+                grid-area: footer;
+                display: grid;
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+                justify-content: stretch;
+                align-content: end;
+                gap: 7px;
+                padding: 0 4px 8px;
+                font-size: 11px;
+            }
+            #footer span {
+                min-width: 0;
+                padding: 7px 6px;
+                border: 1px solid rgba(28, 43, 69, 0.72);
+                border-radius: 8px;
+                background: rgba(7, 11, 20, 0.38);
+                text-align: center;
+                white-space: nowrap;
+            }
+            #footer span:first-child { grid-column: 1 / -1; }
+            #footer kbd {
+                padding: 1px 5px;
+                font-size: 10px;
+            }
+            .start-card {
+                width: 390px;
+                padding: 30px 36px 26px;
+            }
+            .start-card.slot-picker-active {
+                width: min(620px, 84%);
+                padding: 36px 44px 32px;
+            }
+            .start-card.slot-picker-active .slot-list {
+                display: grid;
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+                gap: 14px;
+            }
+            .start-card.slot-picker-active .slot-item {
+                min-height: 154px;
+                flex-direction: column;
+                align-items: flex-start;
+                padding: 18px;
+            }
+            .start-card.slot-picker-active .slot-info { width: 100%; }
+            .start-card.slot-picker-active .slot-action { margin-top: auto; }
+            .draft-card-wrap { max-width: 760px; }
+            .buff-card { width: 180px; }
+        }
+
         @media (max-width: 860px) {
             #game-wrapper { padding: 12px; border-radius: 14px; }
             #gameCanvas { width: 100%; height: auto; aspect-ratio: 800/600; }
@@ -630,7 +759,7 @@
     <div id="game-stage">
         <canvas id="gameCanvas" width="800" height="600"></canvas>
         <div id="start-panel" class="active">
-            <div class="start-card">
+            <div class="start-card" id="start-card">
                 <div class="start-title">砖块王</div>
                 <div class="start-sub">BRICK&nbsp;KING</div>
                 <div class="mode-select" id="modeSelect">
@@ -835,6 +964,7 @@
     const modalHighScore = document.getElementById('modalHighScore');
     const btnRestart = document.getElementById('btn-restart');
     const startPanel = document.getElementById('start-panel');
+    const startCard = document.getElementById('start-card');
     const startButtons = document.getElementById('startButtons');
     const slotList = document.getElementById('slotList');
     const btnNew = document.getElementById('btn-new');
@@ -1507,12 +1637,14 @@
         draftPanel.classList.remove('active');
         startPanel.classList.add('active');
         // 重置为主菜单视图
+        startCard.classList.remove('slot-picker-active');
         startButtons.classList.remove('hidden');
         slotList.classList.add('hidden');
         btnBack.classList.add('hidden');
         menuHighScoreEl.textContent = highScore;
     }
     function showSlotPicker(mode) {
+        startCard.classList.add('slot-picker-active');
         startButtons.classList.add('hidden');
         slotList.classList.remove('hidden');
         btnBack.classList.remove('hidden');
@@ -2721,6 +2853,7 @@
     btnNew.addEventListener('click', () => { ensureAudio(); showSlotPicker('new'); });
     btnLoad.addEventListener('click', () => { ensureAudio(); showSlotPicker('load'); });
     btnBack.addEventListener('click', () => {
+        startCard.classList.remove('slot-picker-active');
         startButtons.classList.remove('hidden');
         slotList.classList.add('hidden');
         btnBack.classList.add('hidden');

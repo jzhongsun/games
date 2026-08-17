@@ -1554,7 +1554,8 @@
         const anchor = (nearColumn.length ? nearColumn : alive).reduce((lowest, b) =>
             !lowest || b.y > lowest.y ? b : lowest, null);
         const x = anchor.x + anchor.w / 2;
-        const y = anchor.y + anchor.h / 2;
+        // 爆心落在目标砖下沿，表现为二踢脚从下方顶进砖阵。
+        const y = anchor.y + anchor.h;
         // 爆炸范围与 TNT 完全相同；范围内砖块均可被炸毁，但不会触发额外 TNT 连锁。
         const victims = alive.filter(b => Math.hypot(b.x + b.w / 2 - x, b.y + b.h / 2 - y) <= TNT_RADIUS);
         for (const b of victims) destroyBrickByWeapon(b);
@@ -1800,6 +1801,7 @@
         paddle.targetW = basePaddleWidth();
         paddle2.x = (W - paddle2.w) / 2;
         powerups = [];
+        weaponShots = [];
         resetBallsToPaddle();
         state = 'serving';
         // 每 3 关设置检查点：完成 3/6/9... 关后，进入下一关时覆盖当前存档
@@ -3121,32 +3123,6 @@
         }
     }
 
-    function drawArsenalHud() {
-        if (state === 'menu') return;
-        const pulse = 1 + arsenalPulse * 0.08;
-        ctx.save();
-        // 固定在右侧中部边缘，避开底部平台与左下“剩余砖块”信息。
-        ctx.translate(W - 188, H / 2 - 26);
-        ctx.scale(pulse, pulse);
-        ctx.fillStyle = 'rgba(10,16,28,0.9)';
-        roundRect(ctx, 0, 0, 174, 52, 12); ctx.fill();
-        ctx.strokeStyle = fireworks > 0 ? '#ffd93d' : '#ff7849';
-        ctx.lineWidth = 1.5;
-        roundRect(ctx, 0, 0, 174, 52, 12); ctx.stroke();
-        ctx.fillStyle = '#ff9b69';
-        ctx.font = 'bold 14px "Segoe UI", "PingFang SC", sans-serif';
-        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-        ctx.fillText(`🧨 ${infiniteFirecrackers ? '∞' : firecrackers + '/3'}`, 12, 17);
-        ctx.fillStyle = '#ffd93d';
-        ctx.fillText(`🎆 ${fireworks}`, 78, 17);
-        ctx.fillStyle = '#9aacC8';
-        ctx.font = '11px "Segoe UI", "PingFang SC", sans-serif';
-        const ready = fireworks > 0 ? '空格：发射礼花' : firecrackers > 0 || infiniteFirecrackers
-            ? '空格：发射二踢脚' : '击碎砖块收集军火';
-        ctx.fillText(ready, 12, 38);
-        ctx.restore();
-    }
-
     function drawParticles() {
         ctx.save();
         ctx.globalCompositeOperation = 'lighter';
@@ -3541,14 +3517,14 @@
     }
 
     // ================= 输入 =================
-    function primaryAction() {
+    function primaryAction(fireWeapon = false) {
         ensureAudio();
         if (state === 'serving') {
             if (twoPlayer) { launchDuel(); return; }
             launchBalls();
             state = 'playing';
             stage.classList.add('playing');
-        } else if (state === 'playing' && !twoPlayer) {
+        } else if (state === 'playing' && !twoPlayer && fireWeapon) {
             launchWeapon();
         } else if (state === 'paused') {
             if (twoPlayer && duel) {
@@ -3595,7 +3571,7 @@
         else if (k === 'd' || k === 'D') { keys.p1r = true; e.preventDefault(); }
         else if (k === 'ArrowLeft') { keys.p2l = true; e.preventDefault(); }
         else if (k === 'ArrowRight') { keys.p2r = true; e.preventDefault(); }
-        else if (k === ' ' || k === 'Spacebar') { e.preventDefault(); primaryAction(); }
+        else if (k === ' ' || k === 'Spacebar') { e.preventDefault(); primaryAction(true); }
         else if (k === 'p' || k === 'P' || k === 'Escape') {
             if (state === 'playing' || state === 'serving') { state = 'paused'; stage.classList.remove('playing'); }
             else if (state === 'paused') primaryAction();

@@ -62,6 +62,27 @@
             display: block;
             margin-top: 1px;
         }
+        #arsenal-panel {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+            padding: 7px 10px;
+            color: var(--text);
+            background: rgba(7,11,20,0.6);
+            border: 1px solid rgba(255,120,73,0.55);
+            border-radius: 10px;
+            box-shadow: inset 0 0 16px rgba(255,120,73,0.04);
+            transition: 0.18s;
+        }
+        #arsenal-panel.ready {
+            border-color: var(--gold);
+            box-shadow: 0 0 14px rgba(255,217,61,0.12), inset 0 0 16px rgba(255,217,61,0.05);
+        }
+        #arsenal-panel.pulse { transform: scale(1.04); }
+        .arsenal-count { font-size: 13px; font-weight: 800; white-space: nowrap; }
+        .arsenal-count.firecracker { color: #ff9b69; }
+        .arsenal-count.firework { color: var(--gold); }
+        #arsenal-hint { margin-left: auto; color: var(--text-dim); font-size: 10px; white-space: nowrap; }
         .hud {
             display: flex;
             align-items: center;
@@ -649,6 +670,10 @@
                 margin-top: 3px;
                 font-size: 12px;
             }
+            #arsenal-panel {
+                margin-top: -8px;
+                padding: 9px 11px;
+            }
             .hud {
                 display: grid;
                 grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -735,6 +760,11 @@
 <div id="game-wrapper">
     <div id="header">
         <div class="game-title">砖块王<small>BRICK&nbsp;KING</small></div>
+        <div id="arsenal-panel" title="游戏进行中按空格键发射">
+            <span class="arsenal-count firecracker" id="firecracker-count">🧨 0/3</span>
+            <span class="arsenal-count firework" id="firework-count">🎆 0</span>
+            <span id="arsenal-hint">空格发射</span>
+        </div>
         <div class="hud">
             <div class="hud-item">
                 <span class="hud-label">关卡</span>
@@ -801,7 +831,7 @@
     </div>
     <div id="footer">
         <span><kbd>A</kbd><kbd>D</kbd>P1 · <kbd>←</kbd><kbd>→</kbd>P2/单人</span>
-        <span><kbd>空格</kbd>发射</span>
+        <span><kbd>空格</kbd>发球 / 发射军火</span>
         <span><kbd>P</kbd>暂停</span>
         <span><kbd>Q</kbd>返回菜单</span>
         <span><kbd>F</kbd>全屏</span>
@@ -854,7 +884,10 @@
             <div class="dev-label">快捷秘籍</div>
             <div class="dev-row">
                 <button id="dev-half" class="dev-btn">💥 消失一半砖块</button>
+                <button id="dev-firecracker" class="dev-btn">🧨 获得二踢脚</button>
+                <button id="dev-firework" class="dev-btn">🎆 获得礼花</button>
                 <label class="dev-toggle"><input type="checkbox" id="dev-infinite" /> ♾ 无限生命</label>
+                <label class="dev-toggle"><input type="checkbox" id="dev-infinite-firecracker" /> ♾ 无限二踢脚</label>
             </div>
         </div>
         <div class="dev-footer">
@@ -893,6 +926,14 @@
     const DROP_CHANCE = 0.22;
     const POWERUP_SPEED = 150;
     const POWERUP_SIZE = 30;
+
+    // 二踢脚军火系统：独立于普通道具掉落，每 3 个自动合成 1 个礼花
+    const FIRECRACKER_DROP_CHANCE = 0.05;
+    const FIRECRACKER_BUFF_CHANCE = 0.08;
+    const FIRECRACKER_CHANCE_PER_BUFF = 0.03;
+    const FIRECRACKER_CHANCE_MAX = 0.20;
+    const FIRECRACKERS_PER_FIREWORK = 3;
+    const WEAPON_SPEED = 880;
 
     // TNT 爆炸砖
     const TNT_RADIUS = 135;                                  // 爆炸波及半径
@@ -955,7 +996,16 @@
         combo:  { icon: '🔥', name: '连击大师', color: '#ff9f43', desc: lv => `破砖得分 +${20 * lv}%` },
         edge:   { icon: '🎯', name: '贴边专家', color: '#7cf7b0', desc: lv => `贴边区域扩大（触发更易）` },
         score:  { icon: '⭐', name: '点金之手', color: '#f783ac', desc: lv => `全部得分 +${15 * lv}%` },
+        pyro:   { icon: '🧨', name: '爆竹行家', color: '#ff7849', rare: true,
+                  desc: lv => `二踢脚掉落率 +${3 * lv}%（总计 ${Math.min(20, 5 + 3 * lv)}%）` },
     };
+
+    const FIRECRACKER_INFO = {
+        label: '🧨', color: '#ff7849', name: '二踢脚', weight: 0, arsenal: true,
+    };
+
+    // POWER_TYPES 保持普通道具权重；二踢脚由独立的绝对概率判定。
+    POWER_TYPES.firecracker = FIRECRACKER_INFO;
 
     // ================= DOM =================
     const canvas = document.getElementById('gameCanvas');
@@ -965,6 +1015,10 @@
     const livesDisplay = document.getElementById('livesDisplay');
     const currentScoreEl = document.getElementById('currentScore');
     const highScoreEl = document.getElementById('highScore');
+    const arsenalPanel = document.getElementById('arsenal-panel');
+    const firecrackerCountEl = document.getElementById('firecracker-count');
+    const fireworkCountEl = document.getElementById('firework-count');
+    const arsenalHintEl = document.getElementById('arsenal-hint');
     const btnMute = document.getElementById('btn-mute');
     const modalOverlay = document.getElementById('modal-overlay');
     const modalBox = document.getElementById('modal-box');
@@ -993,7 +1047,10 @@
     const devLevelJump = document.getElementById('dev-level-jump');
     const devBuffsEl = document.getElementById('dev-buffs');
     const devHalf = document.getElementById('dev-half');
+    const devFirecracker = document.getElementById('dev-firecracker');
+    const devFirework = document.getElementById('dev-firework');
     const devInfinite = document.getElementById('dev-infinite');
+    const devInfiniteFirecracker = document.getElementById('dev-infinite-firecracker');
     const devReset = document.getElementById('dev-reset');
     const btnFullscreen = document.getElementById('btn-fullscreen');
     const mode1p = document.getElementById('mode-1p');
@@ -1036,9 +1093,15 @@
     let buffs = {};                 // 当前持有强化 { id: 等级 }
     let pendingBuff = null;         // 增益已满时待入队的新强化
     let rings = [];                 // 爆炸冲击波圆环特效
+    let firecrackers = 0;           // 界面边缘储存的二踢脚
+    let fireworks = 0;              // 每 3 个二踢脚自动合成的礼花
+    let weaponShots = [];           // 正在飞向砖阵的二踢脚 / 礼花
+    let arsenalPulse = 0;           // 合成或获得军火时的边缘 HUD 脉冲
+    let fireworkFlash = 0;          // 礼花爆炸时的全屏五色闪光
     // 开发者秘籍
     let devOpen = false;            // 秘籍弹窗是否打开
     let infiniteLives = false;      // ♾ 无限生命
+    let infiniteFirecrackers = false; // ♾ 发射不消耗二踢脚
     let devBuffer = '';             // 键盘序列缓冲（检测 KOB）
     const keys = { p1l: false, p1r: false, p2l: false, p2r: false };
     // 双人模式：P1 底部球拍（A/D），P2 顶部球拍（←/->）
@@ -1197,6 +1260,10 @@
         ice()     { tone(1100, 0.09, 'square', 0.06); arpeggio([1568, 2093], 0.04, 0.05, 'sine'); },
         poison()  { slideTone(300, 110, 0.5, 'sawtooth', 0.08); tone(240, 0.12, 'sawtooth', 0.07); noiseBurst(0.14, 0.05, 300); },
         fire()    { slideTone(220, 880, 0.35, 'sawtooth', 0.09); noiseBurst(0.22, 0.08, 1800); tone(1760, 0.12, 'triangle', 0.05); },
+        fuse()    { slideTone(520, 1280, 0.28, 'sawtooth', 0.055); noiseBurst(0.18, 0.04, 3200); },
+        firecracker() { tone(72, 0.5, 'sine', 0.18); noiseBurst(0.38, 0.18, 850); tone(150, 0.24, 'sawtooth', 0.12); },
+        craft()   { arpeggio([523, 659, 784, 1047, 1568], 0.045, 0.075, 'square'); },
+        firework(){ tone(58, 0.85, 'sine', 0.2); noiseBurst(0.6, 0.2, 1700); arpeggio([784, 988, 1319, 1568, 1976], 0.055, 0.08, 'triangle'); },
     };
 
     // 中毒：迷离音轨（轻微失谐的双音慢速嗡鸣 + 漂移滑音 + 空气感泛音），中毒消失即停止
@@ -1249,7 +1316,15 @@
         let rule = BRICK_TYPE_RULES[0];
         for (const r of BRICK_TYPE_RULES) if (lv >= r.lv) rule = r;
         const topBias = 1 - row / rows;                    // 1(顶) → 0(底)
-        const w = { normal: rule.normal, red: rule.red, concrete: rule.concrete, ice: rule.ice, poison: rule.poison };
+        // 冰砖与毒砖权重降低 60%，削减的权重回流普通砖，避免特殊砖过密。
+        const reducedSpecial = (rule.ice + rule.poison) * 0.6;
+        const w = {
+            normal: rule.normal + reducedSpecial,
+            red: rule.red,
+            concrete: rule.concrete,
+            ice: rule.ice * 0.4,
+            poison: rule.poison * 0.4,
+        };
         if (topBias > 0.75) { w.normal -= 12; w.red += 6; w.concrete += 6; }
         if (topBias > 0.90) { w.concrete += 8; w.red += 4; }
         let total = 0; for (const k in w) total += Math.max(0, w[k]);
@@ -1258,7 +1333,8 @@
         return BRICK_TYPE.normal;
     }
 
-    function ballSpeedFor(lv) { return Math.min(BALL_SPEED_BASE + (lv - 1) * BALL_SPEED_PER_LEVEL, BALL_SPEED_MAX); }
+    // 整体球速下调 10%，让降低后的冰砖 / 毒砖密度与节奏更匹配。
+    function ballSpeedFor(lv) { return Math.min(BALL_SPEED_BASE + (lv - 1) * BALL_SPEED_PER_LEVEL, BALL_SPEED_MAX) * 0.9; }
 
     // ================= 强化相关辅助 =================
     function buffLv(id) { return buffs[id] || 0; }
@@ -1270,6 +1346,10 @@
     function edgeZone() { return Math.max(0.6, EDGE_ZONE - 0.05 * buffLv('edge')); }
     function ballRadiusNow() { return BALL_RADIUS * (1 + 0.12 * buffLv('ball')); }
     function dropChanceNow() { return Math.min(0.6, DROP_CHANCE + 0.05 * buffLv('lucky')); }
+    function firecrackerDropChanceNow() {
+        return Math.min(FIRECRACKER_CHANCE_MAX,
+            FIRECRACKER_DROP_CHANCE + FIRECRACKER_CHANCE_PER_BUFF * buffLv('pyro'));
+    }
     function addScore(n) {
         const added = Math.round(n * (1 + 0.15 * buffLv('score')));
         score += added;
@@ -1358,12 +1438,25 @@
         return launched;
     }
 
-    // ================= 道具 =================
+    // ================= 道具与军火 =================
+    function spawnPowerup(brick, type) {
+        powerups.push({
+            x: brick.x + brick.w / 2,
+            y: brick.y + brick.h / 2,
+            type, t: 0,
+        });
+    }
+
     function maybeDropPowerup(brick) {
         const forcedBad = brick.badDrop;
+        // 二踢脚是独立掉落（基础 5%）；第三关强制负面砖不会掉落军火。
+        if (!forcedBad && Math.random() < firecrackerDropChanceNow()) {
+            spawnPowerup(brick, 'firecracker');
+        }
         if (!forcedBad && Math.random() > dropChanceNow()) return;
-        // 第 3 关 TNT 周围砖 100% 掉负面技能；其他关按常规权重
-        const entries = Object.entries(POWER_TYPES).filter(([, v]) => !forcedBad || v.bad);
+        // 第 3 关 TNT 周围砖 100% 掉负面技能；军火不进入普通权重池。
+        const entries = Object.entries(POWER_TYPES).filter(([, v]) =>
+            !v.arsenal && (!forcedBad || v.bad));
         const total = entries.reduce((s, [, v]) => s + v.weight, 0);
         let roll = Math.random() * total;
         let type = entries[0][0];
@@ -1371,13 +1464,175 @@
             roll -= v.weight;
             if (roll <= 0) { type = k; break; }
         }
-        powerups.push({
-            x: brick.x + brick.w / 2,
-            y: brick.y + brick.h / 2,
-            type, t: 0,
-        });
+        spawnPowerup(brick, type);
     }
+
+    function collectFirecracker() {
+        firecrackers++;
+        arsenalPulse = 1;
+        updateArsenalUI();
+        addFloatText(78, H - 86, `二踢脚 ${firecrackers}/${FIRECRACKERS_PER_FIREWORK}`, '#ff9b69', 16);
+        SFX.power();
+        if (firecrackers >= FIRECRACKERS_PER_FIREWORK) {
+            firecrackers -= FIRECRACKERS_PER_FIREWORK;
+            fireworks++;
+            arsenalPulse = 1.5;
+            updateArsenalUI();
+            SFX.craft();
+            spawnStarBurst(78, H - 58, 7);
+            addFloatText(110, H - 104, '自动合成礼花！🎆', '#ffd93d', 19);
+        }
+    }
+
+    function weaponTargetX() {
+        const alive = bricks.filter(b => b.alive);
+        if (!alive.length) return W / 2;
+        // 优先瞄准砖块最密集的列，使“两排连接砖块”更稳定地形成纵向缺口。
+        const columns = new Map();
+        for (const b of alive) {
+            const key = Math.round((b.x - brickAreaLeft) / (brickWidth + BRICK_GAP));
+            if (!columns.has(key)) columns.set(key, []);
+            columns.get(key).push(b);
+        }
+        const groups = [...columns.values()];
+        const max = Math.max(...groups.map(group => group.length));
+        const dense = groups.filter(group => group.length === max);
+        const group = dense[randInt(0, dense.length - 1)];
+        return group.reduce((sum, b) => sum + b.x + b.w / 2, 0) / group.length;
+    }
+
+    function launchWeapon() {
+        if (state !== 'playing' || weaponShots.length) return false;
+        let type = null;
+        // 礼花优先发射，避免它被储存中的普通二踢脚遮蔽。
+        if (fireworks > 0) {
+            type = 'firework';
+            fireworks--;
+        } else if (firecrackers > 0 || infiniteFirecrackers) {
+            type = 'firecracker';
+            if (!infiniteFirecrackers) firecrackers--;
+        }
+        if (!type) return false;
+        const x = paddle.x + paddle.w / 2;
+        weaponShots.push({ type, x, y: paddle.y - 10, targetX: weaponTargetX(), trail: [], t: 0 });
+        arsenalPulse = 0.7;
+        updateArsenalUI();
+        SFX.fuse();
+        addFloatText(x, paddle.y - 30, type === 'firework' ? '礼花升空！' : '二踢脚发射！',
+            type === 'firework' ? '#ffd93d' : '#ff9b69', 17);
+        return true;
+    }
+
+    function destroyBrickByWeapon(brick, multiplier = 1) {
+        if (!brick.alive) return;
+        brick.alive = false;
+        const added = addScore((brick.type === BRICK_TYPE.concrete ? 70 : 50) * multiplier);
+        addFloatText(brick.x + brick.w / 2, brick.y + brick.h / 2, '+' + added,
+            multiplier > 1 ? '#ffd93d' : '#d3d7dc', 13);
+        spawnBrickParticles(brick);
+    }
+
+    function spawnGunpowderSmoke(x, y, count = 48) {
+        const greys = ['rgba(235,238,242,0.9)', 'rgba(162,170,180,0.85)',
+            'rgba(93,100,110,0.82)', 'rgba(42,47,54,0.88)'];
+        for (let i = 0; i < count; i++) {
+            const a = rand(0, Math.PI * 2), sp = rand(35, 270);
+            particles.push({
+                kind: 'smoke', x: x + rand(-12, 12), y: y + rand(-6, 6),
+                vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - 35,
+                size: rand(6, 18), color: greys[randInt(0, greys.length - 1)],
+                angle: 0, spin: 0, life: rand(0.7, 1.45), maxLife: 1.45,
+            });
+        }
+    }
+
+    function detonateFirecracker(shot) {
+        const alive = bricks.filter(b => b.alive);
+        if (!alive.length) return;
+        // 从砖阵下方进攻：锁定目标列最下面的砖块，而不是顶部两整排。
+        const nearColumn = alive.filter(b => Math.abs(b.x + b.w / 2 - shot.targetX) <= brickWidth * 0.75);
+        const anchor = (nearColumn.length ? nearColumn : alive).reduce((lowest, b) =>
+            !lowest || b.y > lowest.y ? b : lowest, null);
+        const x = anchor.x + anchor.w / 2;
+        const y = anchor.y + anchor.h / 2;
+        // 爆炸范围与 TNT 完全相同；范围内砖块均可被炸毁，但不会触发额外 TNT 连锁。
+        const victims = alive.filter(b => Math.hypot(b.x + b.w / 2 - x, b.y + b.h / 2 - y) <= TNT_RADIUS);
+        for (const b of victims) destroyBrickByWeapon(b);
+        spawnGunpowderSmoke(x, y, 58);
+        rings.push({ x, y, r: 10, maxR: TNT_RADIUS + 25, life: 0.4, maxLife: 0.4, grey: true });
+        shake = Math.max(shake, 17);
+        flashAlpha = Math.max(flashAlpha, 0.15);
+        SFX.firecracker();
+    }
+
+    function spawnRibbonBurst(count = 230) {
+        const colors = ['#ff3b5c', '#ffd93d', '#38d9ff', '#7cf7b0', '#b197fc'];
+        for (let i = 0; i < count; i++) {
+            const a = rand(0, Math.PI * 2), sp = rand(140, 590);
+            particles.push({
+                kind: 'ribbon', x: W / 2 + rand(-40, 40), y: H / 2 + rand(-28, 28),
+                vx: Math.cos(a) * sp, vy: Math.sin(a) * sp - rand(50, 190),
+                size: rand(7, 15), color: colors[i % colors.length],
+                angle: rand(0, Math.PI * 2), spin: rand(-18, 18),
+                life: rand(1.3, 2.5), maxLife: 2.5,
+            });
+        }
+    }
+
+    function detonateFirework() {
+        const alive = bricks.filter(b => b.alive);
+        const killCount = Math.ceil(alive.length / 2);
+        // 均匀洗牌，保证准确清掉当前仍存活砖块的一半。
+        for (let i = 0; i < killCount; i++) {
+            const j = randInt(i, alive.length - 1);
+            [alive[i], alive[j]] = [alive[j], alive[i]];
+            destroyBrickByWeapon(alive[i], 2);
+        }
+        spawnRibbonBurst();
+        spawnConfetti(170);
+        for (let i = 0; i < 5; i++) {
+            rings.push({ x: W / 2, y: H / 2, r: 12 + i * 8, maxR: W * (0.45 + i * 0.08),
+                life: 0.75, maxLife: 0.75, colorIndex: i });
+        }
+        fireworkFlash = 1;
+        shake = Math.max(shake, 28);
+        SFX.firework();
+        addFloatText(W / 2, H / 2 - 60, '🎆 礼花齐放 · 清屏 50%！', '#ffd93d', 25);
+    }
+
+    function updateWeaponShots(dt) {
+        for (let i = weaponShots.length - 1; i >= 0; i--) {
+            const shot = weaponShots[i];
+            shot.t += dt;
+            shot.x += (shot.targetX - shot.x) * Math.min(1, dt * 4.8);
+            shot.y -= WEAPON_SPEED * dt;
+            shot.trail.push({ x: shot.x, y: shot.y });
+            if (shot.trail.length > 14) shot.trail.shift();
+            if (Math.random() < 0.75) {
+                particles.push({ kind: 'smoke', x: shot.x + rand(-3, 3), y: shot.y + 12,
+                    vx: rand(-24, 24), vy: rand(30, 75), size: rand(3, 7), color: 'rgba(155,160,168,0.72)',
+                    angle: 0, spin: 0, life: 0.45, maxLife: 0.45 });
+            }
+            const alive = bricks.filter(b => b.alive);
+            const inTargetColumn = alive.filter(b =>
+                Math.abs(b.x + b.w / 2 - shot.targetX) <= brickWidth * 0.75);
+            const targets = inTargetColumn.length ? inTargetColumn : alive;
+            const targetY = targets.length
+                ? Math.max(...targets.map(b => b.y + b.h / 2))
+                : AREA_TOP;
+            if (shot.y <= targetY) {
+                if (shot.type === 'firework') detonateFirework();
+                else detonateFirecracker(shot);
+                weaponShots.splice(i, 1);
+            }
+        }
+    }
+
     function applyPowerup(type) {
+        if (type === 'firecracker') {
+            collectFirecracker();
+            return;
+        }
         const info = POWER_TYPES[type];
         addFloatText(paddle.x + paddle.w / 2, paddle.y - 24, info.name, info.color, 16);
         if (!info.bad) spawnStarBurst(paddle.x + paddle.w / 2, paddle.y, 4);
@@ -1480,6 +1735,14 @@
         highScoreEl.textContent = Math.max(highScore, score);
     }
     function updateLevelUI() { levelValueEl.textContent = level; }
+    function updateArsenalUI() {
+        firecrackerCountEl.textContent = `🧨 ${infiniteFirecrackers ? '∞' : firecrackers + '/3'}`;
+        fireworkCountEl.textContent = `🎆 ${fireworks}`;
+        arsenalHintEl.textContent = fireworks > 0 ? '空格发礼花'
+            : firecrackers > 0 || infiniteFirecrackers ? '空格发射' : '等待掉落';
+        arsenalPanel.classList.toggle('ready', fireworks > 0 || firecrackers > 0 || infiniteFirecrackers);
+        arsenalPanel.classList.toggle('pulse', arsenalPulse > 0.9);
+    }
 
     // ================= 生命 / 结束 =================
     function loseLife() {
@@ -1547,12 +1810,17 @@
     function openDraft() {
         state = 'draft';
         stage.classList.remove('playing');
-        // 候选：未满级的强化（已持有的会升级）
-        const pool = Object.keys(BUFF_DEFS).filter(id => buffLv(id) < MAX_BUFF_LV);
+        // 爆竹行家是 8% 稀有技能；其余卡从常规池等概率补齐三选一。
+        const available = Object.keys(BUFF_DEFS).filter(id => buffLv(id) < MAX_BUFF_LV);
+        const rareAvailable = available.includes('pyro');
+        const pool = available.filter(id => !BUFF_DEFS[id].rare);
         const picks = [];
+        if (rareAvailable && Math.random() < FIRECRACKER_BUFF_CHANCE) picks.push('pyro');
         while (picks.length < 3 && pool.length) {
             picks.push(pool.splice(randInt(0, pool.length - 1), 1)[0]);
         }
+        // 常规卡全部满级时仍允许稀有卡出现，避免抽卡界面为空。
+        if (!picks.length && rareAvailable) picks.push('pyro');
         renderDraft(picks);
         draftPanel.classList.add('active');
         SFX.power();
@@ -1667,7 +1935,7 @@
         if (!currentSlot || twoPlayer) return;
         try {
             localStorage.setItem(slotKey(currentSlot), JSON.stringify({
-                level, score, lives, buffs, twoPlayer, ts: Date.now(),
+                level, score, lives, buffs, firecrackers, fireworks, twoPlayer, ts: Date.now(),
             }));
         } catch (_) {}
     }
@@ -1695,7 +1963,7 @@
             if (data) {
                 info.innerHTML =
                     `<span class="slot-line1">第 ${data.level} 关 · ${data.score} 分 · ❤${data.lives}</span>` +
-                    `<span class="slot-line2">${formatSlotTime(data.ts)}</span>`;
+                    `<span class="slot-line2">🧨${data.firecrackers || 0} · 🎆${data.fireworks || 0} · ${formatSlotTime(data.ts)}</span>`;
             } else {
                 info.innerHTML = '<span class="slot-line1">空存档位</span><span class="slot-line2">--</span>';
             }
@@ -2291,9 +2559,15 @@
         }
         if (freezeTimer > 0) freezeTimer -= dt;
         if (paddleFlash > 0) paddleFlash -= dt;
+        if (arsenalPulse > 0) {
+            arsenalPulse = Math.max(0, arsenalPulse - dt * 1.8);
+            updateArsenalUI();
+        }
+        if (fireworkFlash > 0) fireworkFlash = Math.max(0, fireworkFlash - dt * 1.35);
 
         if (state === 'playing') {
             updateBalls(dt);
+            updateWeaponShots(dt);
 
             // 接道具（磁力：范围内的道具被吸向球拍）
             const magnetR = 45 * buffLv('magnet');
@@ -2348,7 +2622,7 @@
             p.life -= dt;
             if (p.life <= 0) { particles.splice(i, 1); continue; }
             p.x += p.vx * dt; p.y += p.vy * dt;
-            p.vy += (p.kind === 'confetti' ? 70 : 600) * dt;
+            p.vy += (p.kind === 'confetti' || p.kind === 'ribbon' ? 70 : p.kind === 'smoke' ? -18 : 600) * dt;
             p.angle = (p.angle || 0) + (p.spin || 0) * dt;
         }
         // 浮动文字
@@ -2800,19 +3074,77 @@
     }
 
     function drawRings() {
+        const fireworkColors = ['255,59,92', '255,217,61', '56,217,255', '124,247,176', '177,151,252'];
         for (const r of rings) {
             const a = clamp(r.life / r.maxLife, 0, 1);
-            ctx.strokeStyle = `rgba(255,140,60,${a * 0.8})`;
+            const rgb = r.grey ? '170,176,184'
+                : r.colorIndex !== undefined ? fireworkColors[r.colorIndex % fireworkColors.length]
+                : '255,140,60';
+            ctx.strokeStyle = `rgba(${rgb},${a * 0.8})`;
             ctx.lineWidth = 3 + 4 * a;
             ctx.beginPath();
             ctx.arc(r.x, r.y, r.r, 0, Math.PI * 2);
             ctx.stroke();
-            ctx.strokeStyle = `rgba(255,217,61,${a * 0.5})`;
+            ctx.strokeStyle = r.grey
+                ? `rgba(80,86,94,${a * 0.5})`
+                : `rgba(255,217,61,${a * 0.5})`;
             ctx.lineWidth = 1.5;
             ctx.beginPath();
             ctx.arc(r.x, r.y, r.r * 0.72, 0, Math.PI * 2);
             ctx.stroke();
         }
+    }
+
+    function drawWeaponShots() {
+        for (const shot of weaponShots) {
+            for (let i = 0; i < shot.trail.length; i++) {
+                const t = shot.trail[i];
+                ctx.fillStyle = `rgba(255,${shot.type === 'firework' ? 217 : 112},61,${i / shot.trail.length * 0.45})`;
+                ctx.beginPath();
+                ctx.arc(t.x, t.y, 2 + i / shot.trail.length * 3, 0, Math.PI * 2);
+                ctx.fill();
+            }
+            ctx.save();
+            ctx.translate(shot.x, shot.y);
+            ctx.shadowColor = shot.type === 'firework' ? '#ffd93d' : '#ff5d3a';
+            ctx.shadowBlur = 18;
+            ctx.fillStyle = shot.type === 'firework' ? '#ffd93d' : '#d63b27';
+            roundRect(ctx, -6, -15, 12, 30, 5);
+            ctx.fill();
+            ctx.fillStyle = '#fff2c7';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(shot.type === 'firework' ? '礼' : '炮', 0, 1);
+            ctx.strokeStyle = '#ffed8a'; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(0, -15); ctx.quadraticCurveTo(7, -22, 2, -27); ctx.stroke();
+            ctx.restore();
+        }
+    }
+
+    function drawArsenalHud() {
+        if (state === 'menu') return;
+        const pulse = 1 + arsenalPulse * 0.08;
+        ctx.save();
+        // 固定在右侧中部边缘，避开底部平台与左下“剩余砖块”信息。
+        ctx.translate(W - 188, H / 2 - 26);
+        ctx.scale(pulse, pulse);
+        ctx.fillStyle = 'rgba(10,16,28,0.9)';
+        roundRect(ctx, 0, 0, 174, 52, 12); ctx.fill();
+        ctx.strokeStyle = fireworks > 0 ? '#ffd93d' : '#ff7849';
+        ctx.lineWidth = 1.5;
+        roundRect(ctx, 0, 0, 174, 52, 12); ctx.stroke();
+        ctx.fillStyle = '#ff9b69';
+        ctx.font = 'bold 14px "Segoe UI", "PingFang SC", sans-serif';
+        ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+        ctx.fillText(`🧨 ${infiniteFirecrackers ? '∞' : firecrackers + '/3'}`, 12, 17);
+        ctx.fillStyle = '#ffd93d';
+        ctx.fillText(`🎆 ${fireworks}`, 78, 17);
+        ctx.fillStyle = '#9aacC8';
+        ctx.font = '11px "Segoe UI", "PingFang SC", sans-serif';
+        const ready = fireworks > 0 ? '空格：发射礼花' : firecrackers > 0 || infiniteFirecrackers
+            ? '空格：发射二踢脚' : '击碎砖块收集军火';
+        ctx.fillText(ready, 12, 38);
+        ctx.restore();
     }
 
     function drawParticles() {
@@ -2840,6 +3172,16 @@
             } else if (p.kind === 'confetti') {
                 ctx.globalCompositeOperation = 'source-over';
                 ctx.fillRect(-p.size / 2, -p.size * 0.25, p.size, p.size * 0.5);
+                ctx.globalCompositeOperation = 'lighter';
+            } else if (p.kind === 'ribbon') {
+                ctx.globalCompositeOperation = 'source-over';
+                ctx.lineWidth = Math.max(2, p.size * 0.34);
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(-p.size, 0);
+                ctx.bezierCurveTo(-p.size * 0.3, -p.size * 0.65,
+                    p.size * 0.3, p.size * 0.65, p.size, 0);
+                ctx.stroke();
                 ctx.globalCompositeOperation = 'lighter';
             } else if (p.kind === 'ice') {
                 ctx.beginPath(); ctx.arc(0, 0, p.size, 0, Math.PI * 2); ctx.fill();
@@ -3047,6 +3389,7 @@
             drawBuffBar();
             drawBricks();
             drawPowerups();
+            drawWeaponShots();
             drawParticles();
             drawRings();
             drawPaddle();
@@ -3137,6 +3480,18 @@
 
         drawFullscreenHud();
 
+        // 礼花全屏五色爆闪（保留透明度，避免遮住彩带）
+        if (fireworkFlash > 0) {
+            const colors = ['255,59,92', '255,217,61', '56,217,255', '124,247,176', '177,151,252'];
+            const stripeW = W / colors.length;
+            colors.forEach((rgb, i) => {
+                ctx.fillStyle = `rgba(${rgb},${fireworkFlash * 0.16})`;
+                ctx.fillRect(i * stripeW - 20, -20, stripeW + 1, H + 40);
+            });
+            ctx.fillStyle = `rgba(255,255,255,${fireworkFlash * 0.22})`;
+            ctx.fillRect(-20, -20, W + 40, H + 40);
+        }
+
         // 掉命红闪
         if (flashAlpha > 0) {
             ctx.fillStyle = `rgba(255,60,80,${flashAlpha * 0.32})`;
@@ -3193,6 +3548,8 @@
             launchBalls();
             state = 'playing';
             stage.classList.add('playing');
+        } else if (state === 'playing' && !twoPlayer) {
+            launchWeapon();
         } else if (state === 'paused') {
             if (twoPlayer && duel) {
                 state = duel.sides.some(s => s.ball.vx || s.ball.vy) ? 'playing' : 'serving';
@@ -3342,6 +3699,17 @@
         if (e.key === 'Enter') devJumpLevel(parseInt(devLevelInput.value, 10));
     });
     devHalf.addEventListener('click', devKillHalfBricks);
+    devFirecracker.addEventListener('click', () => {
+        collectFirecracker();
+        renderDevBuffs();
+    });
+    devFirework.addEventListener('click', () => {
+        fireworks++;
+        arsenalPulse = 1.5;
+        updateArsenalUI();
+        SFX.craft();
+        addFloatText(W / 2, H / 2, '获得礼花 ×1', '#ffd93d', 18);
+    });
     devInfinite.addEventListener('change', () => {
         infiniteLives = devInfinite.checked;
         if (infiniteLives) {
@@ -3349,9 +3717,17 @@
             updateLivesUI();
         }
     });
+    devInfiniteFirecracker.addEventListener('change', () => {
+        infiniteFirecrackers = devInfiniteFirecracker.checked;
+        arsenalPulse = 1;
+        updateArsenalUI();
+    });
     devReset.addEventListener('click', () => {
         infiniteLives = false;
+        infiniteFirecrackers = false;
         devInfinite.checked = false;
+        devInfiniteFirecracker.checked = false;
+        updateArsenalUI();
         addFloatText(W / 2, H / 2, '秘籍效果已关闭', '#ff8fa3', 16);
     });
 
@@ -3360,6 +3736,7 @@
         devOpen = true;
         devLevelInput.value = level;
         devInfinite.checked = infiniteLives;
+        devInfiniteFirecracker.checked = infiniteFirecrackers;
         renderDevBuffs();
         devPanel.classList.add('active');
         SFX.power();
@@ -3418,7 +3795,7 @@
         level = n;
         updateLevelUI();
         bricks = createBricks(level);
-        powerups = []; particles = []; floatTexts = []; rings = [];
+        powerups = []; particles = []; floatTexts = []; rings = []; weaponShots = [];
         expandTimer = shrinkTimer = freezeTimer = 0;
         edgeBoost = false;
         paddle.targetW = basePaddleWidth();
@@ -3451,10 +3828,14 @@
             level = clamp(saveData.level || 1, 1, 9999);
             score = saveData.score || 0;
             lives = clamp(saveData.lives || MAX_LIVES, 1, LIVES_CAP);
+            firecrackers = Math.max(0, Math.floor(saveData.firecrackers || 0));
+            fireworks = Math.max(0, Math.floor(saveData.fireworks || 0));
         } else {
             level = 1;
             score = 0;
             lives = MAX_LIVES;
+            firecrackers = 0;
+            fireworks = 0;
         }
         buffs = {};
         if (saveData && saveData.buffs) {
@@ -3472,14 +3853,15 @@
         paddle2.x = (W - paddle2.w) / 2;
         bricks = createBricks(level);
         powerups = []; particles = []; floatTexts = [];
-        rings = [];
+        rings = []; weaponShots = [];
+        arsenalPulse = fireworkFlash = 0;
         if (twoPlayer) initDuel();
         else { duel = null; resetBallsToPaddle(); }
         hideStartPanel();
         draftPanel.classList.remove('active');
         modalOverlay.classList.remove('active');
         modalBox.classList.remove('record');
-        updateScoreUI(); updateLivesUI(); updateLevelUI();
+        updateScoreUI(); updateLivesUI(); updateLevelUI(); updateArsenalUI();
         state = 'serving';
         lastTime = performance.now();
         if (!twoPlayer) saveGame();    // 对战为独立比赛，不覆盖单人关卡存档
@@ -3505,6 +3887,7 @@
         paddle.targetW = basePaddleWidth();
         paddle2.x = (W - paddle2.w) / 2;
         powerups = [];
+        weaponShots = [];
         particles = [];
         bricks = createBricks(level);
         resetBallsToPaddle();
@@ -3515,7 +3898,7 @@
     }
 
     function boot() {
-        updateScoreUI(); updateLivesUI(); updateLevelUI();
+        updateScoreUI(); updateLivesUI(); updateLevelUI(); updateArsenalUI();
         menuHighScoreEl.textContent = highScore;
         renderMusicPicker();
         lastTime = performance.now();
